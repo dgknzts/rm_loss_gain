@@ -11,6 +11,7 @@ library(DT)
 utils::globalVariables(c(
   "number_deviation", "spacing", "correct_num", "correct_width", "width_deviation",
   "correct_space", "spacing_deviation", "width_deviation_relative", "spacing_deviation_relative",
+  "pooled_width_deviation", "edge_to_edge_spacing_deviation",
   "exp_version", "rm_type", "emmean", "lower.CL", "upper.CL", "n",
   "subID", "mean_outcome", "ci_lower", "ci_upper"
 ))
@@ -51,15 +52,20 @@ ui <- fluidPage(
       ),
       tags$hr(),
       h4("OUTCOME VARIABLE"),
+      p(style = "font-size: 12px; color: #666; margin-bottom: 10px;", 
+        "Select the dependent variable to analyze. Hover over choices for calculation details."),
       selectInput(
         inputId = "outcome",
         label = NULL,
         choices = c(
-          "width_deviation" = "width_deviation",
-          "spacing_deviation" = "spacing_deviation",
-          "width_density_deviation" = "width_density_deviation",
-          "relative_width_deviation" = "width_deviation_relative",
-          "relative_spacing_deviation" = "spacing_deviation_relative"
+          "Width Deviation (response - correct width)" = "width_deviation",
+          "Absolute Width Deviation (|response - correct width|)" = "absolute_width_deviation",
+          "Spacing Deviation (response - correct spacing)" = "spacing_deviation",
+          "Relative Width Deviation (width error / correct width)" = "width_deviation_relative",
+          "Relative Spacing Deviation (spacing error / correct spacing)" = "spacing_deviation_relative",
+          "Pooled Width Deviation (total width area error)" = "pooled_width_deviation",
+          "Width Density Deviation (response - correct density)" = "width_density_deviation",
+          "Edge-to-Edge Spacing Deviation (gap between elements error)" = "edge_to_edge_spacing_deviation"
         ),
         selected = "width_deviation"
       ),
@@ -176,6 +182,12 @@ server <- function(input, output, session) {
       ) %>%
       dplyr::select(-correct_width_num, -correct_space_num)
   }
+  
+  # Add absolute width deviation if missing
+  if (!"absolute_width_deviation" %in% names(df_raw)) {
+    df_raw <- df_raw %>%
+      dplyr::mutate(absolute_width_deviation = abs(width_deviation))
+  }
 
   # Experiments available (single select)
   observe({
@@ -268,8 +280,13 @@ server <- function(input, output, session) {
     req(input$outcome, input$x_axis)
     pretty_outcome <- switch(input$outcome,
                              width_deviation = "Width Deviation",
+                             absolute_width_deviation = "Absolute Width Deviation",
                              spacing_deviation = "Spacing Deviation",
-                             width_density_deviation = "Density Deviation",
+                             width_deviation_relative = "Relative Width Deviation",
+                             spacing_deviation_relative = "Relative Spacing Deviation",
+                             pooled_width_deviation = "Pooled Width Deviation",
+                             width_density_deviation = "Width Density Deviation",
+                             edge_to_edge_spacing_deviation = "Edge-to-Edge Spacing Deviation",
                              input$outcome)
     x_part <- if (input$x_axis == "None") "" else paste0(" by ", gsub("_", " ", input$x_axis))
     h3(paste0(input$exp_select, " — ", pretty_outcome, ": RM vs NoRM", x_part))
@@ -279,14 +296,17 @@ server <- function(input, output, session) {
   output$outcome_note <- renderUI({
     req(input$outcome)
     note <- switch(input$outcome,
-      width_deviation = "Outcome: width_deviation = response_width - correct_width",
-      spacing_deviation = "Outcome: spacing_deviation = response_space - correct_space",
-      width_density_deviation = "Outcome: width_density_deviation = response_width_density - actual_width_density",
-      width_deviation_relative = "Outcome: relative_width_deviation = (response_width - correct_width) / correct_width",
-      spacing_deviation_relative = "Outcome: relative_spacing_deviation = (response_space - correct_space) / correct_space",
+      width_deviation = "width_deviation = response_width - correct_width",
+      absolute_width_deviation = "absolute_width_deviation = abs(response_width - correct_width)",
+      spacing_deviation = "spacing_deviation = response_space - correct_space",
+      width_deviation_relative = "width_deviation_relative = (response_width - correct_width) / correct_width",
+      spacing_deviation_relative = "spacing_deviation_relative = (response_space - correct_space) / correct_space",
+      pooled_width_deviation = "pooled_width_deviation = (response_width × response_num) - (correct_width × correct_num)",
+      width_density_deviation = "width_density_deviation = response_width_density - actual_width_density<br/>where width_density = (width × number) / stimulus_length",
+      edge_to_edge_spacing_deviation = "edge_to_edge_spacing_deviation = (response_space - response_width) - (correct_space - correct_width)<br/>measuring the gap between elements",
       paste0("Outcome: ", input$outcome)
     )
-    HTML(paste0("<i>", note, "</i>"))
+    HTML(paste0("<i><b>Calculation:</b> ", note, "</i>"))
   })
 
   # Plot
