@@ -83,7 +83,7 @@ ui <- fluidPage(
       selectInput(
         inputId = "x_axis",
         label = "X-Axis Variable",
-        choices = c("spacing_category", "correct_num", "correct_width"),
+        choices = c("None", "spacing_category", "correct_num", "correct_width"),
         selected = "correct_width"
       ),
       checkboxInput("size_dots", "Size individual dots by trial proportion", value = FALSE),
@@ -154,7 +154,7 @@ server <- function(input, output, session) {
 
   # Ensure x-axis options reflect factor controls
   observe({
-    updateSelectInput(session, "x_axis", choices = c("spacing_category", "correct_num", "correct_width"), selected = input$x_axis)
+    updateSelectInput(session, "x_axis", choices = c("None", "spacing_category", "correct_num", "correct_width"), selected = input$x_axis)
   })
 
   # Filtered data according to selections
@@ -220,7 +220,8 @@ server <- function(input, output, session) {
                              spacing_deviation = "Spacing Deviation",
                              width_density_deviation = "Density Deviation",
                              input$outcome)
-    h3(paste0(input$exp_select, " — ", pretty_outcome, ": RM vs NoRM by ", gsub("_", " ", input$x_axis)))
+    x_part <- if (input$x_axis == "None") "" else paste0(" by ", gsub("_", " ", input$x_axis))
+    h3(paste0(input$exp_select, " — ", pretty_outcome, ": RM vs NoRM", x_part))
   })
 
   # Short note explaining the selected outcome computation
@@ -252,7 +253,9 @@ server <- function(input, output, session) {
     outcome_col <- input$outcome
 
     # Determine grouping based on display mode
-    if (input$display_mode == "facet") {
+    if (input$x_axis == "None") {
+      group_vars <- c("rm_type")
+    } else if (input$display_mode == "facet") {
       group_vars <- unique(c("rm_type", xvar, setdiff(selected, xvar)))
     } else {
       group_vars <- unique(c("rm_type", xvar))
@@ -262,14 +265,10 @@ server <- function(input, output, session) {
       dplyr::group_by(subID, dplyr::across(dplyr::all_of(group_vars)), rm_type) %>%
       dplyr::summarise(mean_outcome = mean(.data[[outcome_col]], na.rm = TRUE), n_trials = dplyr::n(), .groups = "drop")
 
-    if (isTRUE(input$size_dots)) {
-      subject_means <- subject_means %>%
-        dplyr::group_by(subID, dplyr::across(dplyr::all_of(setdiff(group_vars, "rm_type")))) %>%
-        dplyr::mutate(total_trials_cell = sum(n_trials), trial_prop = n_trials / total_trials_cell) %>%
-        dplyr::ungroup()
-    } else {
-      subject_means <- subject_means %>% dplyr::mutate(trial_prop = NA_real_)
-    }
+    # Trial proportion per cell (to size grand points only)
+    cell_totals <- subject_means %>%
+      dplyr::group_by(dplyr::across(dplyr::all_of(group_vars))) %>%
+      dplyr::summarise(total_trials = sum(n_trials), .groups = "drop")
 
     grand <- subject_means %>%
       dplyr::group_by(dplyr::across(dplyr::all_of(setdiff(group_vars, "subID")))) %>%
@@ -278,8 +277,13 @@ server <- function(input, output, session) {
         mean_outcome = mean(mean_outcome, na.rm = TRUE),
         sd_outcome = stats::sd(mean_outcome, na.rm = TRUE),
         se_outcome = sd_outcome / sqrt(n_participants),
+        n_trials = sum(n_trials),
         .groups = "drop"
       ) %>%
+      dplyr::left_join(cell_totals, by = group_vars) %>%
+      dplyr::mutate(trial_prop = n_trials / total_trials)
+
+      %>%
       dplyr::mutate(
         # Handle single-participant cells where sd is NA → set SE to 0 so bars render
         se_outcome = dplyr::if_else(is.na(se_outcome), 0, se_outcome),
@@ -298,25 +302,21 @@ server <- function(input, output, session) {
       )
 
     # Build facet label early so all layers can reference it
-    facet_vars <- if (input$display_mode == "facet") setdiff(group_vars, c("rm_type", xvar)) else character(0)
+    facet_vars <- if (input$display_mode == "facet" && input$x_axis != "None") setdiff(group_vars, c("rm_type", xvar)) else character(0)
     if (length(facet_vars) > 0) {
       grand$facet_label <- do.call(interaction, c(grand[facet_vars], list(drop = TRUE, sep = " • ")))
     }
 
     aes_x <- rlang::sym(xvar)
 
-    p <- ggplot2::ggplot(grand, ggplot2::aes(x = !!aes_x, y = mean_outcome, color = rm_type)) +
+    # Base ggplot (x is dummy when None)
+    p <- ggplot2::ggplot(grand, ggplot2::aes(x = if (input$x_axis == "None") rm_type else !!aes_x, y = mean_outcome, color = rm_type)) +
       ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
       ggplot2::geom_errorbar(ggplot2::aes(ymin = ci_lower, ymax = ci_upper), width = 0.0, size = 1.2, position = ggplot2::position_dodge(width = 0.5), alpha = 0.8) +
-      {
-        if (isTRUE(input$size_dots))
-          ggplot2::geom_point(data = subject_means, ggplot2::aes(x = !!aes_x, y = mean_outcome, size = trial_prop, color = rm_type), alpha = 0.6, inherit.aes = FALSE, position = ggplot2::position_jitter(width = 0.02, height = 0))
-        else
-          ggplot2::geom_point(data = subject_means, ggplot2::aes(x = !!aes_x, y = mean_outcome, color = rm_type), size = 4, alpha = 0.6, inherit.aes = FALSE, position = ggplot2::position_jitter(width = 0.02, height = 0))
-      } +
-      { if (isTRUE(input$size_dots)) ggplot2::scale_size_continuous(name = "Trial proportion", range = c(2.5, 8), limits = c(0, 1)) else NULL } +
+      ggplot2::geom_point(ggplot2::aes(size = if (isTRUE(input$size_dots)) trial_prop else NULL), alpha = 0.9, position = ggplot2::position_dodge(width = 0.5)) +
+      { if (isTRUE(input$size_dots)) ggplot2::scale_size_continuous(name = "Trial proportion", range = c(3.5, 8), limits = c(0, 1)) else NULL } +
       ggplot2::scale_color_manual(values = c("RM" = RM_COLOR, "NoRM" = NORM_COLOR)) +
-      ggplot2::labs(x = gsub("_", " ", xvar), y = input$outcome, color = "Condition")
+      ggplot2::labs(x = if (input$x_axis == "None") "Condition" else gsub("_", " ", xvar), y = input$outcome, color = "Condition")
 
     # Optional fixed y-limits without dropping data
     if (isTRUE(input$fix_y_limits) && is.finite(as.numeric(input$y_min)) && is.finite(as.numeric(input$y_max))) {
