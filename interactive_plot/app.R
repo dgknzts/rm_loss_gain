@@ -86,6 +86,7 @@ ui <- fluidPage(
         choices = c("spacing_category", "correct_num", "correct_width"),
         selected = "correct_width"
       ),
+      checkboxInput("size_dots", "Size individual dots by trial proportion", value = FALSE),
       tags$hr(),
       h4("Y-AXIS LIMITS (optional)"),
       checkboxInput("fix_y_limits", "Fix y-axis limits", value = FALSE),
@@ -100,6 +101,7 @@ ui <- fluidPage(
       plotOutput("main_plot", height = "600px"),
       uiOutput("sample_info"),
       uiOutput("model_formula"),
+      uiOutput("outcome_note"),
       downloadButton("download_plot", "Download Plot"),
       br(),
       checkboxInput("show_emm", "Show emmeans table", value = FALSE),
@@ -221,6 +223,20 @@ server <- function(input, output, session) {
     h3(paste0(input$exp_select, " — ", pretty_outcome, ": RM vs NoRM by ", gsub("_", " ", input$x_axis)))
   })
 
+  # Short note explaining the selected outcome computation
+  output$outcome_note <- renderUI({
+    req(input$outcome)
+    note <- switch(input$outcome,
+      width_deviation = "Outcome: width_deviation = response_width - correct_width",
+      spacing_deviation = "Outcome: spacing_deviation = response_space - correct_space",
+      width_density_deviation = "Outcome: width_density_deviation = response_width_density - actual_width_density",
+      width_deviation_relative = "Outcome: relative_width_deviation = (response_width - correct_width) / correct_width",
+      spacing_deviation_relative = "Outcome: relative_spacing_deviation = (response_space - correct_space) / correct_space",
+      paste0("Outcome: ", input$outcome)
+    )
+    HTML(paste0("<i>", note, "</i>"))
+  })
+
   # Plot
   plot_obj <- reactive({
     dat <- data_filtered()
@@ -243,8 +259,17 @@ server <- function(input, output, session) {
     }
 
     subject_means <- dat %>%
-      dplyr::group_by(subID, dplyr::across(dplyr::all_of(group_vars))) %>%
-      dplyr::summarise(mean_outcome = mean(.data[[outcome_col]], na.rm = TRUE), .groups = "drop")
+      dplyr::group_by(subID, dplyr::across(dplyr::all_of(group_vars)), rm_type) %>%
+      dplyr::summarise(mean_outcome = mean(.data[[outcome_col]], na.rm = TRUE), n_trials = dplyr::n(), .groups = "drop")
+
+    if (isTRUE(input$size_dots)) {
+      subject_means <- subject_means %>%
+        dplyr::group_by(subID, dplyr::across(dplyr::all_of(setdiff(group_vars, "rm_type")))) %>%
+        dplyr::mutate(total_trials_cell = sum(n_trials), trial_prop = n_trials / total_trials_cell) %>%
+        dplyr::ungroup()
+    } else {
+      subject_means <- subject_means %>% dplyr::mutate(trial_prop = NA_real_)
+    }
 
     grand <- subject_means %>%
       dplyr::group_by(dplyr::across(dplyr::all_of(setdiff(group_vars, "subID")))) %>%
@@ -283,7 +308,13 @@ server <- function(input, output, session) {
     p <- ggplot2::ggplot(grand, ggplot2::aes(x = !!aes_x, y = mean_outcome, color = rm_type)) +
       ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
       ggplot2::geom_errorbar(ggplot2::aes(ymin = ci_lower, ymax = ci_upper), width = 0.0, size = 1.2, position = ggplot2::position_dodge(width = 0.5), alpha = 0.8) +
-      ggplot2::geom_point(size = 6, position = ggplot2::position_dodge(width = 0.5)) +
+      {
+        if (isTRUE(input$size_dots))
+          ggplot2::geom_point(data = subject_means, ggplot2::aes(x = !!aes_x, y = mean_outcome, size = trial_prop, color = rm_type), alpha = 0.6, inherit.aes = FALSE, position = ggplot2::position_jitter(width = 0.02, height = 0))
+        else
+          ggplot2::geom_point(data = subject_means, ggplot2::aes(x = !!aes_x, y = mean_outcome, color = rm_type), size = 4, alpha = 0.6, inherit.aes = FALSE, position = ggplot2::position_jitter(width = 0.02, height = 0))
+      } +
+      { if (isTRUE(input$size_dots)) ggplot2::scale_size_continuous(name = "Trial proportion", range = c(2.5, 8), limits = c(0, 1)) else NULL } +
       ggplot2::scale_color_manual(values = c("RM" = RM_COLOR, "NoRM" = NORM_COLOR)) +
       ggplot2::labs(x = gsub("_", " ", xvar), y = input$outcome, color = "Condition")
 
