@@ -140,6 +140,13 @@ df <- df %>%
     edge_to_edge_spacing_deviation = response_edge_to_edge_spacing - actual_edge_to_edge_spacing
   )
 
+# Relative deviation measures for convenient downstream use
+df <- df %>%
+  mutate(
+    width_deviation_relative = if_else(correct_width != 0, width_deviation / correct_width, NA_real_),
+    spacing_deviation_relative = if_else(correct_space != 0, spacing_deviation / correct_space, NA_real_)
+  )
+
 # Counting filtered trials
 source("analysis/helpers/counting_exclusions.R")
 
