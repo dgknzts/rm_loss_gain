@@ -9,6 +9,9 @@ datasets/Exp1A/
 datasets/Exp1B/
 datasets/Exp1C/
 
+# Ignore generated figures
+figures/
+
 # R specific ignores
 .Rproj.user/
 .Rhistory
