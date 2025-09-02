@@ -61,7 +61,7 @@ ui <- fluidPage(
         selected = "width_deviation"
       ),
       tags$hr(),
-      h4("FACTORS TO INCLUDE"),
+      h4("FACTORS FOR PLOTTING"),
       checkboxGroupInput(
         inputId = "factors",
         label = NULL,
@@ -72,21 +72,27 @@ ui <- fluidPage(
         ),
         selected = c("correct_width")
       ),
-      tags$hr(),
-      h4("DISPLAY OPTIONS"),
-      radioButtons(
-        inputId = "display_mode",
-        label = NULL,
-        choices = c("Pool Variables" = "pool", "Facet Variables" = "facet"),
-        selected = "facet"
-      ),
       selectInput(
         inputId = "x_axis",
         label = "X-Axis Variable",
         choices = c("None", "spacing_category", "correct_num", "correct_width"),
         selected = "correct_width"
       ),
-      checkboxInput("size_dots", "Size individual dots by trial proportion", value = FALSE),
+      tags$hr(),
+      h4("MODEL VARIABLES"),
+      checkboxGroupInput(
+        inputId = "model_vars",
+        label = NULL,
+        choices = c(
+          spacing_category = "spacing_category",
+          correct_num = "correct_num",
+          correct_width = "correct_width"
+        ),
+        selected = c("spacing_category", "correct_num", "correct_width")
+      ),
+      checkboxInput("include_interactions", "Include interactions (\"*\")", value = TRUE),
+      tags$hr(),
+      h4("DISPLAY OPTIONS"),
       tags$hr(),
       h4("Y-AXIS LIMITS (optional)"),
       checkboxInput("fix_y_limits", "Fix y-axis limits", value = FALSE),
@@ -107,6 +113,25 @@ ui <- fluidPage(
       checkboxInput("show_emm", "Show emmeans table", value = FALSE),
       conditionalPanel(
         condition = "input.show_emm == true",
+        h4("EMMEANS OPTIONS"),
+        checkboxGroupInput(
+          inputId = "emm_vars",
+          label = "Condition by variables (independent of model)",
+          choices = c("spacing_category", "correct_num", "correct_width"),
+          selected = c()
+        ),
+        radioButtons(
+          inputId = "emm_comparison_type",
+          label = "Comparison Type",
+          choices = c(
+            "Pairwise comparisons (RM vs NoRM)" = "pairwise",
+            "One-sample t-tests (vs 0)" = "onesample"
+          ),
+          selected = "pairwise"
+        )
+      ),
+      conditionalPanel(
+        condition = "input.show_emm == true",
         dataTableOutput("emm_table")
       ),
       br(),
@@ -120,6 +145,8 @@ server <- function(input, output, session) {
   if (file.exists("preAnalysis/helpers/theme_scientific.R")) {
     source("preAnalysis/helpers/theme_scientific.R")
   }
+
+  # Keep default emmeans/lmerTest settings to avoid long runtimes
 
   # Load and prepare data once
   processed_path <- find_data_file("datasets/processed.csv")
@@ -152,9 +179,28 @@ server <- function(input, output, session) {
     updateRadioButtons(session, "exp_select", choices = sort(unique(df_raw$exp_version)), selected = sort(unique(df_raw$exp_version))[1])
   })
 
-  # Ensure x-axis options reflect factor controls
+  # Update factor choices based on experiment - exclude spacing_category for Exp1C
   observe({
-    updateSelectInput(session, "x_axis", choices = c("None", "spacing_category", "correct_num", "correct_width"), selected = input$x_axis)
+    if (input$exp_select == "Exp1C") {
+      # Exp1C has fixed spacing, so exclude spacing_category
+      factor_choices <- c("correct_num", "correct_width")
+      x_axis_choices <- c("None", "correct_num", "correct_width")
+      model_choices <- c("correct_num", "correct_width")
+      emm_choices <- c("correct_num", "correct_width")
+    } else {
+      # Other experiments include all factors
+      factor_choices <- c("spacing_category", "correct_num", "correct_width")
+      x_axis_choices <- c("None", "spacing_category", "correct_num", "correct_width")
+      model_choices <- c("spacing_category", "correct_num", "correct_width")
+      emm_choices <- c("spacing_category", "correct_num", "correct_width")
+    }
+    
+    # Update all relevant inputs
+    updateCheckboxGroupInput(session, "factors", choices = factor_choices)
+    updateCheckboxGroupInput(session, "model_vars", choices = model_choices, 
+                           selected = model_choices)  # Keep all available selected
+    updateSelectInput(session, "x_axis", choices = x_axis_choices)
+    updateCheckboxGroupInput(session, "emm_vars", choices = emm_choices)
   })
 
   # Filtered data according to selections
@@ -179,14 +225,16 @@ server <- function(input, output, session) {
 
   # Build model formula dynamically
   model_formula_reactive <- reactive({
-    req(input$outcome, input$factors, input$x_axis)
-    # Always include rm_type; include x-axis in factors if missing
-    selected <- unique(c(input$factors, input$x_axis))
+    req(input$outcome, input$model_vars)
+    # Always include rm_type; use model variables selection
+    selected <- input$model_vars
     selected <- selected[selected %in% c("spacing_category", "correct_num", "correct_width")]
     rhs <- if (length(selected) == 0) {
       "rm_type"
-    } else {
+    } else if (isTRUE(input$include_interactions)) {
       paste(c("rm_type", selected), collapse = " * ")
+    } else {
+      paste(c("rm_type", selected), collapse = " + ")
     }
     as.formula(paste(input$outcome, "~", rhs, "+ (1|subID)"))
   })
@@ -201,12 +249,12 @@ server <- function(input, output, session) {
     dat <- droplevels(dat)
     mdl <- lme4::lmer(fml, data = dat, control = lme4::lmerControl(check.rankX = "ignore"))
 
-    xvar <- input$x_axis
-    selected <- unique(c(input$factors, xvar))
-    selected <- selected[selected %in% c("spacing_category", "correct_num", "correct_width")]
+    # Use independent emmeans conditioning vars (emm_vars)
+    cond_vars <- input$emm_vars
+    if (is.null(cond_vars)) cond_vars <- character(0)
 
-    by_vars <- if (input$display_mode == "facet") unique(c(xvar, setdiff(selected, xvar))) else xvar
-    spec_rhs <- if (length(by_vars) > 0) paste(by_vars, collapse = " * ") else "1"
+    # Handle None: only rm_type
+    spec_rhs <- if (length(cond_vars) > 0) paste(cond_vars, collapse = " * ") else "1"
     spec_formula <- stats::as.formula(paste("~ rm_type |", spec_rhs))
     em <- emmeans::emmeans(mdl, specs = spec_formula)
     as.data.frame(stats::confint(em, level = 0.95, adjust = "none"))
@@ -252,57 +300,42 @@ server <- function(input, output, session) {
     # Compute participant-level means then grand means with 95% CI
     outcome_col <- input$outcome
 
-    # Determine grouping based on display mode
-    if (input$x_axis == "None") {
-      group_vars <- c("rm_type")
-    } else if (input$display_mode == "facet") {
-      group_vars <- unique(c("rm_type", xvar, setdiff(selected, xvar)))
-    } else {
-      group_vars <- unique(c("rm_type", xvar))
-    }
+    # Always group by rm_type plus all selected plotting factors for CI calculation
+    group_vars <- c("rm_type", input$factors)
+    group_vars <- group_vars[group_vars %in% c("rm_type", "spacing_category", "correct_num", "correct_width")]
 
     subject_means <- dat %>%
-      dplyr::group_by(subID, dplyr::across(dplyr::all_of(group_vars)), rm_type) %>%
+      dplyr::group_by(subID, dplyr::across(dplyr::all_of(group_vars))) %>%
       dplyr::summarise(mean_outcome = mean(.data[[outcome_col]], na.rm = TRUE), n_trials = dplyr::n(), .groups = "drop")
 
-    # Trial proportion per cell (to size grand points only)
-    cell_totals <- subject_means %>%
-      dplyr::group_by(dplyr::across(dplyr::all_of(group_vars))) %>%
-      dplyr::summarise(total_trials = sum(n_trials), .groups = "drop")
-
+    # Group by condition variables only (not subID)
+    condition_vars <- c("rm_type", input$factors)
+    condition_vars <- condition_vars[condition_vars %in% names(subject_means)]
+    
     grand <- subject_means %>%
-      dplyr::group_by(dplyr::across(dplyr::all_of(setdiff(group_vars, "subID")))) %>%
+      dplyr::group_by(dplyr::across(dplyr::all_of(condition_vars))) %>%
       dplyr::summarise(
         n_participants = dplyr::n_distinct(subID),
-        mean_outcome = mean(mean_outcome, na.rm = TRUE),
         sd_outcome = stats::sd(mean_outcome, na.rm = TRUE),
+        mean_outcome = mean(mean_outcome, na.rm = TRUE),
         se_outcome = sd_outcome / sqrt(n_participants),
         n_trials = sum(n_trials),
         .groups = "drop"
       ) %>%
-      dplyr::left_join(cell_totals, by = group_vars) %>%
-      dplyr::mutate(trial_prop = n_trials / total_trials)
-
-      %>%
       dplyr::mutate(
-        # Handle single-participant cells where sd is NA → set SE to 0 so bars render
-        se_outcome = dplyr::if_else(is.na(se_outcome), 0, se_outcome),
-        # Ensure we always have visible CIs
-        tcrit = dplyr::if_else(n_participants > 1, stats::qt(0.975, df = pmax(n_participants - 1, 1)), 1.96),
-        # Calculate raw CIs
-        ci_lower_raw = mean_outcome - tcrit * se_outcome,
-        ci_upper_raw = mean_outcome + tcrit * se_outcome,
-        # Force minimum CI width for visibility (make it much larger)
-        ci_range = pmax(ci_upper_raw - ci_lower_raw, 0.05),  # Increased from 0.01 to 0.05
-        ci_lower = mean_outcome - ci_range/2,
-        ci_upper = mean_outcome + ci_range/2,
-        # Debug info
-        debug_se = se_outcome,
-        debug_range = ci_range
+        tcrit = dplyr::if_else(n_participants > 1, stats::qt(0.975, df = n_participants - 1), NA_real_),
+        ci_lower = mean_outcome - tcrit * se_outcome,
+        ci_upper = mean_outcome + tcrit * se_outcome
       )
 
     # Build facet label early so all layers can reference it
-    facet_vars <- if (input$display_mode == "facet" && input$x_axis != "None") setdiff(group_vars, c("rm_type", xvar)) else character(0)
+    if (input$x_axis == "None") {
+      facet_vars <- input$factors
+    } else {
+      facet_vars <- setdiff(input$factors, input$x_axis)
+    }
+    facet_vars <- facet_vars[facet_vars %in% c("spacing_category", "correct_num", "correct_width")]
+    
     if (length(facet_vars) > 0) {
       grand$facet_label <- do.call(interaction, c(grand[facet_vars], list(drop = TRUE, sep = " • ")))
     }
@@ -313,8 +346,7 @@ server <- function(input, output, session) {
     p <- ggplot2::ggplot(grand, ggplot2::aes(x = if (input$x_axis == "None") rm_type else !!aes_x, y = mean_outcome, color = rm_type)) +
       ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
       ggplot2::geom_errorbar(ggplot2::aes(ymin = ci_lower, ymax = ci_upper), width = 0.0, size = 1.2, position = ggplot2::position_dodge(width = 0.5), alpha = 0.8) +
-      ggplot2::geom_point(ggplot2::aes(size = if (isTRUE(input$size_dots)) trial_prop else NULL), alpha = 0.9, position = ggplot2::position_dodge(width = 0.5)) +
-      { if (isTRUE(input$size_dots)) ggplot2::scale_size_continuous(name = "Trial proportion", range = c(3.5, 8), limits = c(0, 1)) else NULL } +
+      ggplot2::geom_point(size = 5, alpha = 0.9, position = ggplot2::position_dodge(width = 0.5)) +
       ggplot2::scale_color_manual(values = c("RM" = RM_COLOR, "NoRM" = NORM_COLOR)) +
       ggplot2::labs(x = if (input$x_axis == "None") "Condition" else gsub("_", " ", xvar), y = input$outcome, color = "Condition")
 
@@ -387,52 +419,102 @@ server <- function(input, output, session) {
   output$emm_table <- renderDataTable({
     req(input$show_emm)
     df <- emm_results()
-    # Attempt to add p-values for RM vs NoRM contrasts when available
-    # Build model and contrast table
+    # Build model and contrast table using independent emmeans conditioning
     dat <- data_filtered()
     fml <- model_formula_reactive()
     dat <- droplevels(dat)
     mdl <- lme4::lmer(fml, data = dat, control = lme4::lmerControl(check.rankX = "ignore"))
 
-    xvar <- input$x_axis
-    selected <- unique(c(input$factors, xvar))
-    selected <- selected[selected %in% c("spacing_category", "correct_num", "correct_width")]
-    by_vars <- if (input$display_mode == "facet") unique(c(xvar, setdiff(selected, xvar))) else xvar
+    by_vars <- input$emm_vars
+    if (is.null(by_vars)) by_vars <- character(0)
     spec_rhs <- if (length(by_vars) > 0) paste(by_vars, collapse = " * ") else "1"
     spec_formula <- stats::as.formula(paste("~ rm_type |", spec_rhs))
 
-    # Get contrasts RM - NoRM with Bonferroni correction
-    contr <- try(emmeans::contrast(emmeans::emmeans(mdl, specs = spec_formula), method = "revpairwise", by = by_vars, adjust = "bonferroni"), silent = TRUE)
-    if (!inherits(contr, "try-error")) {
-      contr_df <- as.data.frame(contr)
-      # Format p-values and add significance indicators
-      if ("p.value" %in% names(contr_df)) {
-        contr_df <- contr_df %>%
-          dplyr::mutate(
-            p_formatted = dplyr::case_when(
-              p.value < 0.001 ~ "< 0.001",
-              TRUE ~ as.character(round(p.value, 3))
-            ),
-            significance = dplyr::case_when(
-              p.value < 0.001 ~ "***",
-              p.value < 0.01 ~ "**",
-              p.value < 0.05 ~ "*",
-              p.value < 0.1 ~ ".",
-              TRUE ~ ""
-            ),
-            p_with_sig = paste0(p_formatted, " ", significance)
-          ) %>%
-          dplyr::select(-p.value, -p_formatted, -significance) %>%
-          dplyr::rename(p_value = p_with_sig) %>%
-          dplyr::mutate(across(where(is.numeric), ~ round(., 3)))
+    # Get emmeans using consistent formula for both comparison types
+    emm_obj <- emmeans::emmeans(mdl, specs = spec_formula)
+    
+    if (input$emm_comparison_type == "onesample") {
+      # One-sample tests vs 0 for each emmean
+      null_sum <- try(emmeans::test(emm_obj, null = 0, adjust = "bonferroni"), silent = TRUE)
+      if (!inherits(null_sum, "try-error")) {
+        null_df <- as.data.frame(null_sum)
+        if ("p.value" %in% names(null_df)) {
+          null_df <- null_df %>%
+            dplyr::mutate(
+              p_formatted = dplyr::case_when(
+                p.value < 1e-4 ~ "< 0.0001",
+                p.value < 0.001 ~ "< 0.001",
+                TRUE ~ as.character(round(p.value, 3))
+              ),
+              significance = dplyr::case_when(
+                p.value < 0.001 ~ "***",
+                p.value < 0.01 ~ "**",
+                p.value < 0.05 ~ "*",
+                p.value < 0.1 ~ ".",
+                TRUE ~ ""
+              ),
+              p_with_sig = paste0(p_formatted, " ", significance)
+            ) %>%
+            dplyr::select(-p.value, -p_formatted, -significance) %>%
+            dplyr::rename(p_value = p_with_sig) %>%
+            dplyr::mutate(across(where(is.numeric), ~ round(., 3)))
+        }
+        res_table <- null_df
       } else {
-        contr_df <- contr_df %>% dplyr::mutate(across(where(is.numeric), ~ round(., 3)))
+        res_table <- data.frame(message = "No results; emmeans test failed")
       }
-      DT::datatable(contr_df, options = list(pageLength = 10))
+      
+      # Ensure consistent column structure for DataTables
+      if (!"contrast" %in% names(res_table) && !"message" %in% names(res_table)) {
+        # Add a contrast-like column for one-sample tests
+        if ("rm_type" %in% names(res_table)) {
+          res_table$contrast <- paste(res_table$rm_type, "vs 0")
+        }
+      }
     } else {
-      df <- df %>% dplyr::mutate(across(where(is.numeric), ~ round(., 3)))
-      DT::datatable(df, options = list(pageLength = 10))
+      # Default: RM vs NoRM pairwise contrasts
+      contr <- try(emmeans::contrast(emm_obj, method = "revpairwise", by = by_vars, adjust = "bonferroni"), silent = TRUE)
+      if (!inherits(contr, "try-error")) {
+        contr_df <- as.data.frame(contr)
+        if ("p.value" %in% names(contr_df)) {
+          contr_df <- contr_df %>%
+            dplyr::mutate(
+              p_formatted = dplyr::case_when(
+                p.value < 1e-4 ~ "< 0.0001",
+                p.value < 0.001 ~ "< 0.001",
+                TRUE ~ as.character(round(p.value, 3))
+              ),
+              significance = dplyr::case_when(
+                p.value < 0.001 ~ "***",
+                p.value < 0.01 ~ "**",
+                p.value < 0.05 ~ "*",
+                p.value < 0.1 ~ ".",
+                TRUE ~ ""
+              ),
+              p_with_sig = paste0(p_formatted, " ", significance)
+            ) %>%
+            dplyr::select(-p.value, -p_formatted, -significance) %>%
+            dplyr::rename(p_value = p_with_sig) %>%
+            dplyr::mutate(across(where(is.numeric), ~ round(., 3)))
+        } else {
+          contr_df <- contr_df %>% dplyr::mutate(across(where(is.numeric), ~ round(., 3)))
+        }
+        res_table <- contr_df
+      } else {
+        res_table <- if (nrow(df)) df %>% dplyr::mutate(across(where(is.numeric), ~ round(., 3))) else data.frame(message = "No pairwise results")
+      }
     }
+
+    # Suppress DataTables warnings and render table
+    suppressWarnings({
+      DT::datatable(res_table, options = list(
+        pageLength = 10,
+        columnDefs = list(list(targets = "_all", className = "dt-center")),
+        dom = 'tip',
+        scrollX = TRUE,
+        language = list(emptyTable = "No data available")
+      ))
+    })
   })
 }
 
