@@ -1,0 +1,5 @@
+"Step","Model_Name","Interaction_Removed","AIC","BIC","LogLik","p_value","Decision"
+"0_Full","full_model","None",-9636.5446454585,-9263.96982977463,4874.27232272925,NA,"Starting_model"
+"1","model_no_4way","4-way_interaction",-9646.17550937163,-9326.82566735689,4871.08775468582,0.605956741768669,"Remove_4way"
+"2_Selected","model_step2","rm_type:spacing_category:correct_num",-9646.30462067936,-9353.56726549918,4867.15231033968,0.0964238561486097,"Selected"
+"Final","final_model","Elimination_stopped_at_Step2",-9646.30462067936,-9353.56726549918,4867.15231033968,NA,"Final_selected"

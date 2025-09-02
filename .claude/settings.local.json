@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(csvq:*)",
+      "Bash(awk:*)",
+      "Bash(move:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git reset:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

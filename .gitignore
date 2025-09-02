@@ -1,0 +1,28 @@
+# Ignore Claude documentation and legacy files
+CLAUDE.md
+*.legacy
+.legacy/
+
+# Ignore individual experiment data folders, keep only summary files
+datasets/Exp1A/
+datasets/Exp1B/
+datasets/Exp1C/
+
+# R specific ignores
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*~
+*.tmp
+*.temp
+
+# Log files
+*.log
