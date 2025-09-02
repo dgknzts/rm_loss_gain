@@ -21,10 +21,13 @@ NORM_COLOR <- "#3498DB"
 
 # Robust data path resolver (works from project root or interactive_plot/)
 find_data_file <- function(rel_path) {
+  # For deployment, also check local directory
+  filename <- basename(rel_path)
   candidates <- c(
-    rel_path,
-    file.path("..", rel_path),
-    file.path("..", "..", rel_path)
+    filename,                    # Local directory (for deployment)
+    rel_path,                   # Relative path as given
+    file.path("..", rel_path),  # One level up
+    file.path("..", "..", rel_path)  # Two levels up
   )
   existing <- candidates[file.exists(candidates)]
   if (length(existing) == 0) {

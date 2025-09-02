@@ -12,6 +12,12 @@ datasets/Exp1C/
 # Ignore generated figures
 figures/
 
+# Shiny deployment files and copied data
+interactive_plot/processed.csv
+interactive_plot/deploy_setup.R
+interactive_plot/DEPLOYMENT_GUIDE.md
+interactive_plot/rsconnect/
+
 # R specific ignores
 .Rproj.user/
 .Rhistory
