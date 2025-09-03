@@ -11,9 +11,9 @@ library(DT)
 utils::globalVariables(c(
   "number_deviation", "spacing", "correct_num", "correct_width", "width_deviation",
   "correct_space", "spacing_deviation", "width_deviation_relative", "spacing_deviation_relative",
-  "pooled_width_deviation", "edge_to_edge_spacing_deviation",
+  "pooled_width_deviation", "edge_to_edge_spacing_deviation", "correct_space_category",
   "exp_version", "rm_type", "emmean", "lower.CL", "upper.CL", "n",
-  "subID", "mean_outcome", "ci_lower", "ci_upper"
+  "subID", "mean_outcome", "ci_lower", "ci_upper", "trial_type"
 ))
 
 # Constants
@@ -44,16 +44,42 @@ ui <- fluidPage(
     sidebarPanel(
       width = 3,
       h4("EXPERIMENT SELECTION"),
-      radioButtons(
+      checkboxGroupInput(
         inputId = "exp_select",
         label = NULL,
         choices = c("Exp1A", "Exp1B", "Exp1C"),
         selected = "Exp1A"
       ),
+      radioButtons(
+        inputId = "viz_mode",
+        label = "Visualization Mode",
+        choices = c(
+          "Single Experiment" = "single",
+          "Overlay Experiments" = "overlay", 
+          "Facet by Experiment" = "facet"
+        ),
+        selected = "single"
+      ),
+      tags$hr(),
+      h4("TRIAL TYPE"),
+      radioButtons(
+        inputId = "trial_type",
+        label = NULL,
+        choices = c(
+          "All Trials" = "all",
+          "Initial Trials Only" = "initial"
+        ),
+        selected = "all"
+      ),
+      conditionalPanel(
+        condition = "input.trial_type == 'initial'",
+        p(style = "font-size: 11px; color: #666; margin-top: -5px; margin-bottom: 10px;", 
+          "Uses correct_space as spacing factor with experiment-specific levels")
+      ),
       tags$hr(),
       h4("OUTCOME VARIABLE"),
       p(style = "font-size: 12px; color: #666; margin-bottom: 10px;", 
-        "Select the dependent variable to analyze. Hover over choices for calculation details."),
+        "Select the dependent variable to analyze."),
       selectInput(
         inputId = "outcome",
         label = NULL,
@@ -122,6 +148,7 @@ ui <- fluidPage(
       checkboxInput("show_emm", "Show emmeans table", value = FALSE),
       conditionalPanel(
         condition = "input.show_emm == true",
+        uiOutput("emmeans_warning"),
         h4("EMMEANS OPTIONS"),
         checkboxGroupInput(
           inputId = "emm_vars",
@@ -170,6 +197,21 @@ server <- function(input, output, session) {
       correct_num = factor(correct_num),
       correct_width = factor(correct_width)
     )
+  
+  # Create correct_space_category factor with experiment-specific levels for initial trials
+  df_raw <- df_raw %>%
+    dplyr::mutate(
+      correct_space_category = dplyr::case_when(
+        exp_version == "Exp1A" ~ factor(as.character(correct_space), 
+                                      levels = c("0.5", "0.7", "0.9"),
+                                      labels = c("0.5", "0.7", "0.9")),
+        exp_version == "Exp1B" ~ factor(as.character(correct_space), 
+                                      levels = c("0.7", "0.9", "1.1"),
+                                      labels = c("0.7", "0.9", "1.1")),
+        exp_version == "Exp1C" ~ factor(as.character(correct_space)),
+        TRUE ~ as.factor(NA)
+      )
+    )
 
   # If relative measures are missing (older processed files), compute them safely using numerics
   if (!"width_deviation_relative" %in% names(df_raw) || !"spacing_deviation_relative" %in% names(df_raw)) {
@@ -188,43 +230,135 @@ server <- function(input, output, session) {
     df_raw <- df_raw %>%
       dplyr::mutate(absolute_width_deviation = abs(width_deviation))
   }
+  
+  # Check if trial_type column exists, create placeholder if missing
+  if (!"trial_type" %in% names(df_raw)) {
+    df_raw$trial_type <- "all"  # Default all trials to "all" type
+    warning("trial_type column not found in data. All trials treated as 'all' type.")
+  }
 
-  # Experiments available (single select)
+  # Experiments available (multi select)
   observe({
-    updateRadioButtons(session, "exp_select", choices = sort(unique(df_raw$exp_version)), selected = sort(unique(df_raw$exp_version))[1])
+    updateCheckboxGroupInput(session, "exp_select", choices = sort(unique(df_raw$exp_version)), selected = sort(unique(df_raw$exp_version))[1])
   })
 
-  # Update factor choices based on experiment - exclude spacing_category for Exp1C
+  # Update factor choices based on selected experiments and trial type with availability indicators
   observe({
-    if (input$exp_select == "Exp1C") {
-      # Exp1C has fixed spacing, so exclude spacing_category
-      factor_choices <- c("correct_num", "correct_width")
-      x_axis_choices <- c("None", "correct_num", "correct_width")
-      model_choices <- c("correct_num", "correct_width")
-      emm_choices <- c("correct_num", "correct_width")
+    req(input$exp_select, input$trial_type)
+    
+    # Capture current selections before updating
+    current_factors <- input$factors
+    current_model_vars <- input$model_vars
+    current_x_axis <- input$x_axis
+    current_emm_vars <- input$emm_vars
+    
+    selected_exps <- input$exp_select
+    
+    # Determine spacing variable based on trial type
+    spacing_var <- if (input$trial_type == "initial") "correct_space_category" else "spacing_category"
+    spacing_label <- if (input$trial_type == "initial") "correct_space_category" else "spacing_category"
+    
+    # For initial trials, all experiments have correct_space_category
+    # For all trials, Exp1C lacks spacing_category
+    if (input$trial_type == "initial") {
+      # Initial trials: all experiments have correct_space_category
+      has_spacing <- TRUE
+      has_spacing_partial <- FALSE
     } else {
-      # Other experiments include all factors
-      factor_choices <- c("spacing_category", "correct_num", "correct_width")
-      x_axis_choices <- c("None", "spacing_category", "correct_num", "correct_width")
-      model_choices <- c("spacing_category", "correct_num", "correct_width")
-      emm_choices <- c("spacing_category", "correct_num", "correct_width")
+      # All trials: Exp1C lacks spacing_category  
+      has_spacing <- !("Exp1C" %in% selected_exps) || length(selected_exps) == 0
+      has_spacing_partial <- any(c("Exp1A", "Exp1B") %in% selected_exps) && ("Exp1C" %in% selected_exps)
     }
     
-    # Update all relevant inputs
-    updateCheckboxGroupInput(session, "factors", choices = factor_choices)
+    # Build factor choices with availability indicators
+    if (has_spacing && !has_spacing_partial) {
+      # All selected experiments have the spacing variable
+      factor_choices <- c(
+        "correct_num" = "correct_num", 
+        "correct_width" = "correct_width"
+      )
+      # Add spacing variable with appropriate name
+      spacing_choice <- setNames(spacing_var, spacing_label)
+      factor_choices <- c(spacing_choice, factor_choices)
+      
+      x_axis_choices <- c("None", spacing_var, "correct_num", "correct_width")
+      
+      model_choices <- c(
+        "correct_num" = "correct_num",
+        "correct_width" = "correct_width"
+      )
+      model_choices <- c(spacing_choice, model_choices)
+      
+      emm_choices <- c(spacing_var, "correct_num", "correct_width")
+    } else if (has_spacing_partial) {
+      # Mixed experiments - show availability indicators (only applies to all trials mode)
+      available_for_spacing <- intersect(selected_exps, c("Exp1A", "Exp1B"))
+      partial_spacing_label <- paste0(spacing_label, " (", paste(available_for_spacing, collapse = ", "), " only)")
+      
+      factor_choices <- c("correct_num", "correct_width")
+      names(factor_choices) <- c("correct_num", "correct_width")
+      factor_choices <- c(setNames(spacing_var, partial_spacing_label), factor_choices)
+      
+      x_axis_choices <- c("None", spacing_var, "correct_num", "correct_width")
+      
+      model_choices <- c("correct_num", "correct_width")
+      names(model_choices) <- c("correct_num", "correct_width")
+      model_choices <- c(setNames(spacing_var, partial_spacing_label), model_choices)
+      
+      emm_choices <- c(spacing_var, "correct_num", "correct_width")
+    } else {
+      # No spacing variable available (only Exp1C selected in "all trials" mode)
+      factor_choices <- c(
+        "correct_num" = "correct_num",
+        "correct_width" = "correct_width"
+      )
+      x_axis_choices <- c("None", "correct_num", "correct_width")
+      model_choices <- c(
+        "correct_num" = "correct_num",
+        "correct_width" = "correct_width"
+      )
+      emm_choices <- c("correct_num", "correct_width")
+    }
+    
+    # Preserve selections where possible (use the actual factor names, not labels)
+    available_factor_values <- unname(factor_choices)
+    available_model_values <- unname(model_choices)
+    
+    preserved_factors <- intersect(current_factors, available_factor_values)
+    preserved_model_vars <- intersect(current_model_vars, available_model_values)
+    preserved_emm_vars <- intersect(current_emm_vars, emm_choices)
+    
+    # For x_axis, check if current selection is still valid
+    # If not valid, reset to "None" to be safe
+    preserved_x_axis <- if (current_x_axis %in% x_axis_choices) current_x_axis else "None"
+    
+    # Update all relevant inputs with preserved selections
+    updateCheckboxGroupInput(session, "factors", choices = factor_choices, 
+                           selected = if(length(preserved_factors) > 0) preserved_factors else unname(factor_choices)[length(factor_choices)])
     updateCheckboxGroupInput(session, "model_vars", choices = model_choices, 
-                           selected = model_choices)  # Keep all available selected
-    updateSelectInput(session, "x_axis", choices = x_axis_choices)
-    updateCheckboxGroupInput(session, "emm_vars", choices = emm_choices)
+                           selected = if(length(preserved_model_vars) > 0) preserved_model_vars else unname(model_choices))
+    updateSelectInput(session, "x_axis", choices = x_axis_choices, 
+                     selected = preserved_x_axis)
+    updateCheckboxGroupInput(session, "emm_vars", choices = emm_choices, 
+                           selected = preserved_emm_vars)
   })
 
   # Filtered data according to selections
   data_filtered <- reactive({
-    req(input$exp_select, input$outcome)
+    req(input$exp_select, input$outcome, input$trial_type)
     dat <- df_raw %>%
-      dplyr::filter(exp_version == input$exp_select) %>%
+      dplyr::filter(exp_version %in% input$exp_select) %>%
       dplyr::filter(number_deviation %in% c(-1, 0)) %>%
       dplyr::filter(!is.na(rm_type))
+    
+    # Apply trial type filtering
+    if (input$trial_type == "initial") {
+      # Filter for initial trials only, remove match trials
+      dat <- dat %>%
+        dplyr::filter(trial_type == "initial") %>%
+        dplyr::filter(trial_type != "match" | is.na(trial_type))
+    }
+    # For "all" trials, no additional filtering needed
 
     # Relative outcome switch only if selected outcome is one of core deviations
     outcome_var <- input$outcome
@@ -240,16 +374,25 @@ server <- function(input, output, session) {
 
   # Build model formula dynamically
   model_formula_reactive <- reactive({
-    req(input$outcome, input$model_vars)
+    req(input$outcome, input$model_vars, input$exp_select, input$trial_type)
     # Always include rm_type; use model variables selection
     selected <- input$model_vars
-    selected <- selected[selected %in% c("spacing_category", "correct_num", "correct_width")]
-    rhs <- if (length(selected) == 0) {
-      "rm_type"
-    } else if (isTRUE(input$include_interactions)) {
-      paste(c("rm_type", selected), collapse = " * ")
+    # Include both possible spacing variables for dynamic selection
+    selected <- selected[selected %in% c("spacing_category", "correct_space_category", "correct_num", "correct_width")]
+    
+    # Include experiment as fixed effect if multiple experiments selected
+    base_vars <- if (length(input$exp_select) > 1) {
+      c("exp_version", "rm_type")
     } else {
-      paste(c("rm_type", selected), collapse = " + ")
+      c("rm_type")
+    }
+    
+    rhs <- if (length(selected) == 0) {
+      paste(base_vars, collapse = " * ")
+    } else if (isTRUE(input$include_interactions)) {
+      paste(c(base_vars, selected), collapse = " * ")
+    } else {
+      paste(c(base_vars, selected), collapse = " + ")
     }
     as.formula(paste(input$outcome, "~", rhs, "+ (1|subID)"))
   })
@@ -257,27 +400,53 @@ server <- function(input, output, session) {
   # Compute emmeans for plotting
   emm_results <- reactive({
     req(input$show_emm)
+    
+    # Skip emmeans computation if multiple experiments selected to avoid convergence issues
+    if (length(input$exp_select) > 1) {
+      return(data.frame(Message = "Emmeans disabled for multiple experiments"))
+    }
+    
     dat <- data_filtered()
     req(nrow(dat) > 0)
     fml <- model_formula_reactive()
 
     dat <- droplevels(dat)
-    mdl <- lme4::lmer(fml, data = dat, control = lme4::lmerControl(check.rankX = "ignore"))
+    
+    # Try to fit model safely
+    mdl <- tryCatch({
+      lme4::lmer(fml, data = dat, control = lme4::lmerControl(check.rankX = "ignore"))
+    }, error = function(e) {
+      return(NULL)
+    })
+    
+    if (is.null(mdl)) {
+      return(data.frame(Message = "Model convergence failed"))
+    }
 
     # Use independent emmeans conditioning vars (emm_vars)
     cond_vars <- input$emm_vars
     if (is.null(cond_vars)) cond_vars <- character(0)
 
-    # Handle None: only rm_type
+    # Single experiment mode - use simple rm_type specification
     spec_rhs <- if (length(cond_vars) > 0) paste(cond_vars, collapse = " * ") else "1"
     spec_formula <- stats::as.formula(paste("~ rm_type |", spec_rhs))
-    em <- emmeans::emmeans(mdl, specs = spec_formula)
+    
+    em <- tryCatch({
+      emmeans::emmeans(mdl, specs = spec_formula)
+    }, error = function(e) {
+      return(NULL)
+    })
+    
+    if (is.null(em)) {
+      return(data.frame(Message = "Emmeans computation failed"))
+    }
+    
     as.data.frame(stats::confint(em, level = 0.95, adjust = "none"))
   })
 
   # Title reflecting selection
   output$plot_title <- renderUI({
-    req(input$outcome, input$x_axis)
+    req(input$outcome, input$x_axis, input$exp_select)
     pretty_outcome <- switch(input$outcome,
                              width_deviation = "Width Deviation",
                              absolute_width_deviation = "Absolute Width Deviation",
@@ -289,7 +458,15 @@ server <- function(input, output, session) {
                              edge_to_edge_spacing_deviation = "Edge-to-Edge Spacing Deviation",
                              input$outcome)
     x_part <- if (input$x_axis == "None") "" else paste0(" by ", gsub("_", " ", input$x_axis))
-    h3(paste0(input$exp_select, " — ", pretty_outcome, ": RM vs NoRM", x_part))
+    
+    # Handle multiple experiments in title
+    exp_part <- if (length(input$exp_select) == 1) {
+      input$exp_select
+    } else {
+      paste0(paste(input$exp_select, collapse = " + "), " (", input$viz_mode, ")")
+    }
+    
+    h3(paste0(exp_part, " — ", pretty_outcome, ": RM vs NoRM", x_part))
   })
 
   # Short note explaining the selected outcome computation
@@ -312,20 +489,37 @@ server <- function(input, output, session) {
   # Plot
   plot_obj <- reactive({
     dat <- data_filtered()
-    req(nrow(dat) > 0)
+    req(nrow(dat) > 0, input$viz_mode, input$exp_select, input$trial_type)
     xvar <- input$x_axis
+    
+    # Validate that x-axis variable exists in the data when not "None"
+    if (xvar != "None" && !xvar %in% names(dat)) {
+      # Fallback to "None" if the selected x-axis variable doesn't exist
+      xvar <- "None"
+    }
+    
     selected <- unique(c(input$factors, xvar))
-    selected <- selected[selected %in% c("spacing_category", "correct_num", "correct_width")]
+    # Include both possible spacing variables for dynamic selection
+    selected <- selected[selected %in% c("spacing_category", "correct_space_category", "correct_num", "correct_width")]
+    
+    # Additional validation: ensure all selected factors exist in the data
+    selected <- selected[selected %in% names(dat)]
 
-    # Ensure factor types for ggplot ordering consistency
-    # Ensure factors already set upstream
-
+    # Determine if we're in multi-experiment mode
+    multi_exp <- length(input$exp_select) > 1 && input$viz_mode != "single"
+    
     # Compute participant-level means then grand means with 95% CI
     outcome_col <- input$outcome
 
-    # Always group by rm_type plus all selected plotting factors for CI calculation
+    # Group variables - add exp_version for multi-experiment modes
     group_vars <- c("rm_type", input$factors)
-    group_vars <- group_vars[group_vars %in% c("rm_type", "spacing_category", "correct_num", "correct_width")]
+    if (multi_exp) {
+      group_vars <- c("exp_version", group_vars)
+    }
+    group_vars <- group_vars[group_vars %in% c("exp_version", "rm_type", "spacing_category", "correct_space_category", "correct_num", "correct_width")]
+    
+    # Additional validation: ensure all group variables exist in the actual data
+    group_vars <- group_vars[group_vars %in% names(dat)]
 
     subject_means <- dat %>%
       dplyr::group_by(subID, dplyr::across(dplyr::all_of(group_vars))) %>%
@@ -333,7 +527,15 @@ server <- function(input, output, session) {
 
     # Group by condition variables only (not subID)
     condition_vars <- c("rm_type", input$factors)
+    if (multi_exp) {
+      condition_vars <- c("exp_version", condition_vars)
+    }
     condition_vars <- condition_vars[condition_vars %in% names(subject_means)]
+    
+    # Ensure at least rm_type exists
+    if (!"rm_type" %in% condition_vars) {
+      condition_vars <- c("rm_type", condition_vars)
+    }
     
     grand <- subject_means %>%
       dplyr::group_by(dplyr::across(dplyr::all_of(condition_vars))) %>%
@@ -351,27 +553,54 @@ server <- function(input, output, session) {
         ci_upper = mean_outcome + tcrit * se_outcome
       )
 
-    # Build facet label early so all layers can reference it
-    if (input$x_axis == "None") {
-      facet_vars <- input$factors
+    # Build faceting variables based on visualization mode
+    if (input$viz_mode == "facet" && multi_exp) {
+      # Facet mode: include experiment in faceting
+      if (input$x_axis == "None") {
+        facet_vars <- c("exp_version", input$factors)
+      } else {
+        facet_vars <- c("exp_version", setdiff(input$factors, input$x_axis))
+      }
     } else {
-      facet_vars <- setdiff(input$factors, input$x_axis)
+      # Single or overlay mode: standard faceting
+      if (input$x_axis == "None") {
+        facet_vars <- input$factors
+      } else {
+        facet_vars <- setdiff(input$factors, input$x_axis)
+      }
     }
-    facet_vars <- facet_vars[facet_vars %in% c("spacing_category", "correct_num", "correct_width")]
+    facet_vars <- facet_vars[facet_vars %in% c("exp_version", "spacing_category", "correct_space_category", "correct_num", "correct_width")]
+    
+    # Additional validation: ensure facet variables exist in the grand data
+    facet_vars <- facet_vars[facet_vars %in% names(grand)]
     
     if (length(facet_vars) > 0) {
       grand$facet_label <- do.call(interaction, c(grand[facet_vars], list(drop = TRUE, sep = " • ")))
     }
 
-    aes_x <- rlang::sym(xvar)
-
-    # Base ggplot (x is dummy when None)
-    p <- ggplot2::ggplot(grand, ggplot2::aes(x = if (input$x_axis == "None") rm_type else !!aes_x, y = mean_outcome, color = rm_type)) +
-      ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
-      ggplot2::geom_errorbar(ggplot2::aes(ymin = ci_lower, ymax = ci_upper), width = 0.0, size = 1.2, position = ggplot2::position_dodge(width = 0.5), alpha = 0.8) +
-      ggplot2::geom_point(size = 5, alpha = 0.9, position = ggplot2::position_dodge(width = 0.5)) +
-      ggplot2::scale_color_manual(values = c("RM" = RM_COLOR, "NoRM" = NORM_COLOR)) +
-      ggplot2::labs(x = if (input$x_axis == "None") "Condition" else gsub("_", " ", xvar), y = input$outcome, color = "Condition")
+    # Build aesthetic mappings based on visualization mode  
+    # Use validated xvar (which may have been reset to "None" if invalid)
+    x_aesthetic <- if (xvar == "None") rlang::sym("rm_type") else rlang::sym(xvar)
+    x_label <- if (input$x_axis == "None") "Condition" else gsub("_", " ", xvar)
+    
+    if (input$viz_mode == "overlay" && multi_exp) {
+      # Overlay mode: use experiment for shape, rm_type for color
+      p <- ggplot2::ggplot(grand, ggplot2::aes(x = !!x_aesthetic, y = mean_outcome, color = rm_type, shape = exp_version)) +
+        ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+        ggplot2::geom_errorbar(ggplot2::aes(ymin = ci_lower, ymax = ci_upper), width = 0.0, size = 1.2, position = ggplot2::position_dodge(width = 0.7), alpha = 0.8) +
+        ggplot2::geom_point(size = 5, alpha = 0.9, position = ggplot2::position_dodge(width = 0.7)) +
+        ggplot2::scale_color_manual(values = c("RM" = RM_COLOR, "NoRM" = NORM_COLOR)) +
+        ggplot2::scale_shape_manual(values = c("Exp1A" = 16, "Exp1B" = 17, "Exp1C" = 15)) +
+        ggplot2::labs(x = x_label, y = input$outcome, color = "RM Type", shape = "Experiment")
+    } else {
+      # Single or facet mode: standard rm_type coloring
+      p <- ggplot2::ggplot(grand, ggplot2::aes(x = !!x_aesthetic, y = mean_outcome, color = rm_type)) +
+        ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+        ggplot2::geom_errorbar(ggplot2::aes(ymin = ci_lower, ymax = ci_upper), width = 0.0, size = 1.2, position = ggplot2::position_dodge(width = 0.5), alpha = 0.8) +
+        ggplot2::geom_point(size = 5, alpha = 0.9, position = ggplot2::position_dodge(width = 0.5)) +
+        ggplot2::scale_color_manual(values = c("RM" = RM_COLOR, "NoRM" = NORM_COLOR)) +
+        ggplot2::labs(x = x_label, y = input$outcome, color = "Condition")
+    }
 
     # Optional fixed y-limits without dropping data
     if (isTRUE(input$fix_y_limits) && is.finite(as.numeric(input$y_min)) && is.finite(as.numeric(input$y_max))) {
@@ -398,10 +627,36 @@ server <- function(input, output, session) {
   # Sample info and counts
   output$sample_info <- renderUI({
     dat <- data_filtered()
-    req(nrow(dat) > 0)
-    n_trials <- nrow(dat)
-    n_participants <- dplyr::n_distinct(dat$subID)
-    HTML(sprintf("<b>Sample size:</b> %s %s trials, %s participants", input$exp_select, n_trials, n_participants))
+    req(nrow(dat) > 0, input$trial_type)
+    
+    # Add trial type information
+    trial_type_text <- if (input$trial_type == "initial") " (Initial trials only)" else ""
+    
+    if (length(input$exp_select) == 1) {
+      # Single experiment
+      n_trials <- nrow(dat)
+      n_participants <- dplyr::n_distinct(dat$subID)
+      HTML(sprintf("<b>Sample size:</b> %s - %s trials, %s participants%s", input$exp_select, n_trials, n_participants, trial_type_text))
+    } else {
+      # Multiple experiments - show breakdown
+      total_trials <- nrow(dat)
+      total_participants <- dplyr::n_distinct(dat$subID)
+      
+      exp_breakdown <- dat %>%
+        dplyr::group_by(exp_version) %>%
+        dplyr::summarise(
+          n_trials = dplyr::n(),
+          n_participants = dplyr::n_distinct(subID),
+          .groups = "drop"
+        ) %>%
+        dplyr::mutate(
+          exp_info = paste0(exp_version, ": ", n_trials, " trials, ", n_participants, " participants")
+        )
+      
+      breakdown_text <- paste(exp_breakdown$exp_info, collapse = " | ")
+      HTML(sprintf("<b>Sample size:</b> Total - %s trials, %s participants%s<br/><small>%s</small>", 
+                   total_trials, total_participants, trial_type_text, breakdown_text))
+    }
   })
 
   # Model formula display
@@ -410,19 +665,54 @@ server <- function(input, output, session) {
     HTML(paste0("<b>Model:</b> ", rlang::expr_text(fml)))
   })
 
+  # Emmeans warning for multiple experiments
+  output$emmeans_warning <- renderUI({
+    req(input$exp_select)
+    if (length(input$exp_select) > 1) {
+      HTML("<div style='background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; padding: 10px; margin-bottom: 10px;'>
+            <strong style='color: #856404;'>⚠️ Warning:</strong> 
+            <span style='color: #856404;'>Emmeans analysis with multiple experiments may cause model convergence issues. 
+            For reliable emmeans results, please select only <strong>one experiment</strong> at a time.</span>
+            </div>")
+    } else {
+      HTML("")
+    }
+  })
+
   # Data availability / warnings
   output$warnings <- renderUI({
     dat <- data_filtered()
-    req(nrow(dat) > 0)
+    req(nrow(dat) > 0, input$trial_type)
     xvar <- input$x_axis
     selected <- unique(c(input$factors, xvar))
-    selected <- selected[selected %in% c("spacing_category", "correct_num", "correct_width")]
+    selected <- selected[selected %in% c("spacing_category", "correct_space_category", "correct_num", "correct_width")]
     by_vars <- unique(c("rm_type", selected))
-    # Count combinations
-    counts <- dat %>% dplyr::count(dplyr::across(dplyr::all_of(by_vars)), name = "n")
-    empty <- counts %>% dplyr::filter(is.na(n) | n == 0)
-    if (nrow(empty) > 0) {
-      HTML("<span style='color:#E74C3C'><b>Warning:</b> Some factor combinations have zero trials and are excluded.</span>")
+    
+    # Validate that selected variables exist in data
+    missing_vars <- by_vars[!by_vars %in% names(dat)]
+    by_vars <- by_vars[by_vars %in% names(dat)]
+    
+    warnings_html <- c()
+    
+    # Warning for missing variables
+    if (length(missing_vars) > 0) {
+      warnings_html <- c(warnings_html, 
+        sprintf("<span style='color:#E74C3C'><b>Warning:</b> Variables not available in current data: %s</span>", 
+                paste(missing_vars, collapse = ", ")))
+    }
+    
+    # Count combinations for existing variables
+    if (length(by_vars) > 0) {
+      counts <- dat %>% dplyr::count(dplyr::across(dplyr::all_of(by_vars)), name = "n")
+      empty <- counts %>% dplyr::filter(is.na(n) | n == 0)
+      if (nrow(empty) > 0) {
+        warnings_html <- c(warnings_html,
+          "<span style='color:#E74C3C'><b>Warning:</b> Some factor combinations have zero trials and are excluded.</span>")
+      }
+    }
+    
+    if (length(warnings_html) > 0) {
+      HTML(paste(warnings_html, collapse = "<br/>"))
     } else {
       HTML("")
     }
@@ -441,16 +731,53 @@ server <- function(input, output, session) {
   # Optional emmeans table
   output$emm_table <- renderDataTable({
     req(input$show_emm)
+    
+    # Check if multiple experiments are selected
+    if (length(input$exp_select) > 1) {
+      # Return a message table instead of attempting analysis
+      warning_table <- data.frame(
+        Message = "Emmeans analysis is disabled for multiple experiments due to potential model convergence issues. Please select only one experiment for emmeans analysis."
+      )
+      return(DT::datatable(warning_table, options = list(
+        pageLength = 5,
+        dom = 't',
+        ordering = FALSE,
+        searching = FALSE
+      )))
+    }
+    
     df <- emm_results()
     # Build model and contrast table using independent emmeans conditioning
     dat <- data_filtered()
     fml <- model_formula_reactive()
     dat <- droplevels(dat)
-    mdl <- lme4::lmer(fml, data = dat, control = lme4::lmerControl(check.rankX = "ignore"))
+    
+    # Try to fit the model with error handling
+    mdl <- tryCatch({
+      lme4::lmer(fml, data = dat, control = lme4::lmerControl(check.rankX = "ignore"))
+    }, error = function(e) {
+      return(NULL)
+    })
+    
+    if (is.null(mdl)) {
+      # Return error message if model fails
+      error_table <- data.frame(
+        Message = paste("Model convergence failed. This may be due to insufficient data or overly complex model specifications.",
+                       "Try reducing model complexity or selecting different factors.")
+      )
+      return(DT::datatable(error_table, options = list(
+        pageLength = 5,
+        dom = 't',
+        ordering = FALSE,
+        searching = FALSE
+      )))
+    }
 
     by_vars <- input$emm_vars
     if (is.null(by_vars)) by_vars <- character(0)
     spec_rhs <- if (length(by_vars) > 0) paste(by_vars, collapse = " * ") else "1"
+    
+    # Single experiment mode - use simple rm_type specification
     spec_formula <- stats::as.formula(paste("~ rm_type |", spec_rhs))
 
     # Get emmeans using consistent formula for both comparison types
