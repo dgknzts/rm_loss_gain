@@ -186,7 +186,7 @@ server <- function(input, output, session) {
 
   # Load and prepare data once
   processed_path <- find_data_file("datasets/processed.csv")
-  df_raw <- read.csv(processed_path)
+  df_raw <- read.csv(processed_path) #%>% filter(correct_space %in% c(0.7, 0.9))
 
   # Precompute helper columns
   df_raw <- df_raw %>%
@@ -250,7 +250,6 @@ server <- function(input, output, session) {
     current_factors <- input$factors
     current_model_vars <- input$model_vars
     current_x_axis <- input$x_axis
-    current_emm_vars <- input$emm_vars
     
     selected_exps <- input$exp_select
     
@@ -288,8 +287,6 @@ server <- function(input, output, session) {
         "correct_width" = "correct_width"
       )
       model_choices <- c(spacing_choice, model_choices)
-      
-      emm_choices <- c(spacing_var, "correct_num", "correct_width")
     } else if (has_spacing_partial) {
       # Mixed experiments - show availability indicators (only applies to all trials mode)
       available_for_spacing <- intersect(selected_exps, c("Exp1A", "Exp1B"))
@@ -304,8 +301,6 @@ server <- function(input, output, session) {
       model_choices <- c("correct_num", "correct_width")
       names(model_choices) <- c("correct_num", "correct_width")
       model_choices <- c(setNames(spacing_var, partial_spacing_label), model_choices)
-      
-      emm_choices <- c(spacing_var, "correct_num", "correct_width")
     } else {
       # No spacing variable available (only Exp1C selected in "all trials" mode)
       factor_choices <- c(
@@ -317,7 +312,6 @@ server <- function(input, output, session) {
         "correct_num" = "correct_num",
         "correct_width" = "correct_width"
       )
-      emm_choices <- c("correct_num", "correct_width")
     }
     
     # Preserve selections where possible (use the actual factor names, not labels)
@@ -326,7 +320,6 @@ server <- function(input, output, session) {
     
     preserved_factors <- intersect(current_factors, available_factor_values)
     preserved_model_vars <- intersect(current_model_vars, available_model_values)
-    preserved_emm_vars <- intersect(current_emm_vars, emm_choices)
     
     # For x_axis, check if current selection is still valid
     # If not valid, reset to "None" to be safe
@@ -339,6 +332,40 @@ server <- function(input, output, session) {
                            selected = if(length(preserved_model_vars) > 0) preserved_model_vars else unname(model_choices))
     updateSelectInput(session, "x_axis", choices = x_axis_choices, 
                      selected = preserved_x_axis)
+  })
+
+  # Separate observer for emmeans choices - only update when experiment selection changes
+  # This prevents interference with user emmeans interactions
+  observe({
+    req(input$exp_select, input$trial_type)
+    
+    # Use isolate to prevent reactive cascade from current emmeans selections
+    current_emm_vars <- isolate(input$emm_vars)
+    
+    selected_exps <- input$exp_select
+    spacing_var <- if (input$trial_type == "initial") "correct_space_category" else "spacing_category"
+    
+    # Determine emmeans choices based on experiment capabilities  
+    if (input$trial_type == "initial") {
+      # Initial trials: all experiments have correct_space_category
+      emm_choices <- c(spacing_var, "correct_num", "correct_width")
+    } else {
+      # All trials: check if Exp1C is selected (it lacks spacing_category)
+      if (!("Exp1C" %in% selected_exps) || length(selected_exps) == 0) {
+        emm_choices <- c(spacing_var, "correct_num", "correct_width") 
+      } else {
+        emm_choices <- c(spacing_var, "correct_num", "correct_width")
+      }
+    }
+    
+    # Only preserve selections that are still valid
+    preserved_emm_vars <- if (is.null(current_emm_vars)) {
+      character(0)
+    } else {
+      intersect(current_emm_vars, emm_choices)
+    }
+    
+    # Update emmeans choices - this should be less disruptive now
     updateCheckboxGroupInput(session, "emm_vars", choices = emm_choices, 
                            selected = preserved_emm_vars)
   })
