@@ -147,8 +147,71 @@ df <- df %>%
     spacing_deviation_relative = if_else(correct_space != 0, spacing_deviation / correct_space, NA_real_)
   )
 
+# Baseline correction measures
+if (file.exists("datasets/one_bar_Exp1ABC.csv")) {
+  cat("Loading baseline correction data...\n")
+  one_bar_data <- read.csv("datasets/one_bar_Exp1ABC.csv")
+  
+  # Calculate individual baseline biases for each participant/experiment/width combination
+  baseline_biases <- one_bar_data %>%
+    group_by(participant, exp_version, correct_width) %>%
+    summarise(baseline_bias = mean(width_deviation, na.rm = TRUE), .groups = "drop") %>%
+    mutate(
+      subID = as.factor(participant)  # Convert to factor to match main dataset
+    ) %>%
+    select(-participant)
+  
+  # Calculate grand average baseline bias for missing participants
+  grand_baseline_biases <- one_bar_data %>%
+    group_by(exp_version, correct_width) %>%
+    summarise(grand_baseline_bias = mean(width_deviation, na.rm = TRUE), .groups = "drop")
+  
+  # Apply baseline correction to main dataset
+  df <- df %>%
+    left_join(baseline_biases, by = c("subID", "exp_version", "correct_width")) %>%
+    left_join(grand_baseline_biases, by = c("exp_version", "correct_width")) %>%
+    mutate(
+      # Use individual bias if available, otherwise use grand average
+      final_baseline_bias = if_else(!is.na(baseline_bias), 
+                                   baseline_bias, 
+                                   grand_baseline_bias),
+      corrected_width_deviation = if_else(!is.na(final_baseline_bias), 
+                                         width_deviation - final_baseline_bias, 
+                                         NA_real_),
+      corrected_width_deviation_relative = if_else(!is.na(corrected_width_deviation) & correct_width != 0,
+                                                   corrected_width_deviation / correct_width,
+                                                   NA_real_)
+    ) %>%
+    select(-baseline_bias, -grand_baseline_bias, -final_baseline_bias)  # Remove temporary columns
+  
+  cat("Baseline correction applied successfully.\n")
+  
+  # Report correction statistics
+  correction_stats <- df %>%
+    group_by(exp_version) %>%
+    summarise(
+      total_trials = n(),
+      individual_corrections = sum(!is.na(corrected_width_deviation) & 
+                                  subID %in% baseline_biases$subID),
+      grand_avg_corrections = sum(!is.na(corrected_width_deviation) & 
+                                 !subID %in% baseline_biases$subID),
+      .groups = "drop"
+    )
+  
+  cat("Correction summary by experiment:\n")
+  print(correction_stats)
+  
+} else {
+  warning("One-bar baseline data (datasets/one_bar_Exp1ABC.csv) not found. Baseline correction variables set to NA.")
+  df <- df %>%
+    mutate(
+      corrected_width_deviation = NA_real_,
+      corrected_width_deviation_relative = NA_real_
+    )
+}
+
 # Counting filtered trials
-source("analysis/helpers/counting_exclusions.R")
+source("preAnalysis/helpers/counting_exclusions.R")
 
 
 # Filtering noise

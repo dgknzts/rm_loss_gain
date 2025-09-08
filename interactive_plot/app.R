@@ -11,6 +11,7 @@ library(DT)
 utils::globalVariables(c(
   "number_deviation", "spacing", "correct_num", "correct_width", "width_deviation",
   "correct_space", "spacing_deviation", "width_deviation_relative", "spacing_deviation_relative",
+  "corrected_width_deviation", "corrected_width_deviation_relative",
   "pooled_width_deviation", "edge_to_edge_spacing_deviation", "correct_space_category",
   "exp_version", "rm_type", "emmean", "lower.CL", "upper.CL", "n",
   "subID", "mean_outcome", "ci_lower", "ci_upper", "trial_type"
@@ -89,6 +90,8 @@ ui <- fluidPage(
           "Spacing Deviation (response - correct spacing)" = "spacing_deviation",
           "Relative Width Deviation (width error / correct width)" = "width_deviation_relative",
           "Relative Spacing Deviation (spacing error / correct spacing)" = "spacing_deviation_relative",
+          "Baseline-Corrected Width Deviation (removes individual bias)" = "corrected_width_deviation",
+          "Baseline-Corrected Relative Width Deviation (bias-corrected relative)" = "corrected_width_deviation_relative",
           "Pooled Width Deviation (total width area error)" = "pooled_width_deviation",
           "Width Density Deviation (response - correct density)" = "width_density_deviation",
           "Edge-to-Edge Spacing Deviation (gap between elements error)" = "edge_to_edge_spacing_deviation"
@@ -110,8 +113,8 @@ ui <- fluidPage(
       selectInput(
         inputId = "x_axis",
         label = "X-Axis Variable",
-        choices = c("None", "spacing_category", "correct_num", "correct_width"),
-        selected = "correct_width"
+        choices = c("None"),
+        selected = "None"
       ),
       tags$hr(),
       h4("MODEL VARIABLES"),
@@ -171,6 +174,7 @@ ui <- fluidPage(
         dataTableOutput("emm_table")
       ),
       br(),
+      uiOutput("x_axis_feedback"),
       uiOutput("warnings")
     )
   )
@@ -231,6 +235,16 @@ server <- function(input, output, session) {
       dplyr::mutate(absolute_width_deviation = abs(width_deviation))
   }
   
+  # Add baseline-corrected variables if missing
+  if (!"corrected_width_deviation" %in% names(df_raw)) {
+    df_raw <- df_raw %>%
+      dplyr::mutate(corrected_width_deviation = NA_real_)
+  }
+  if (!"corrected_width_deviation_relative" %in% names(df_raw)) {
+    df_raw <- df_raw %>%
+      dplyr::mutate(corrected_width_deviation_relative = NA_real_)
+  }
+  
   # Check if trial_type column exists, create placeholder if missing
   if (!"trial_type" %in% names(df_raw)) {
     df_raw$trial_type <- "all"  # Default all trials to "all" type
@@ -280,8 +294,6 @@ server <- function(input, output, session) {
       spacing_choice <- setNames(spacing_var, spacing_label)
       factor_choices <- c(spacing_choice, factor_choices)
       
-      x_axis_choices <- c("None", spacing_var, "correct_num", "correct_width")
-      
       model_choices <- c(
         "correct_num" = "correct_num",
         "correct_width" = "correct_width"
@@ -296,8 +308,6 @@ server <- function(input, output, session) {
       names(factor_choices) <- c("correct_num", "correct_width")
       factor_choices <- c(setNames(spacing_var, partial_spacing_label), factor_choices)
       
-      x_axis_choices <- c("None", spacing_var, "correct_num", "correct_width")
-      
       model_choices <- c("correct_num", "correct_width")
       names(model_choices) <- c("correct_num", "correct_width")
       model_choices <- c(setNames(spacing_var, partial_spacing_label), model_choices)
@@ -307,7 +317,6 @@ server <- function(input, output, session) {
         "correct_num" = "correct_num",
         "correct_width" = "correct_width"
       )
-      x_axis_choices <- c("None", "correct_num", "correct_width")
       model_choices <- c(
         "correct_num" = "correct_num",
         "correct_width" = "correct_width"
@@ -321,17 +330,71 @@ server <- function(input, output, session) {
     preserved_factors <- intersect(current_factors, available_factor_values)
     preserved_model_vars <- intersect(current_model_vars, available_model_values)
     
-    # For x_axis, check if current selection is still valid
-    # If not valid, reset to "None" to be safe
-    preserved_x_axis <- if (current_x_axis %in% x_axis_choices) current_x_axis else "None"
-    
-    # Update all relevant inputs with preserved selections
+    # Update relevant inputs with preserved selections (x_axis handled by separate observer)
     updateCheckboxGroupInput(session, "factors", choices = factor_choices, 
                            selected = if(length(preserved_factors) > 0) preserved_factors else unname(factor_choices)[length(factor_choices)])
     updateCheckboxGroupInput(session, "model_vars", choices = model_choices, 
                            selected = if(length(preserved_model_vars) > 0) preserved_model_vars else unname(model_choices))
-    updateSelectInput(session, "x_axis", choices = x_axis_choices, 
-                     selected = preserved_x_axis)
+  })
+
+  # Reactive value to track x-axis feedback messages
+  x_axis_message <- reactiveVal("")
+  
+  # Observer to synchronize x-axis choices with selected factors
+  observe({
+    req(input$factors, input$exp_select, input$trial_type)
+    
+    # Get current x-axis selection to preserve it if possible
+    current_x_axis <- input$x_axis
+    
+    # Get currently selected factors
+    selected_factors <- input$factors
+    selected_exps <- input$exp_select
+    
+    # Determine which factors are actually available for selected experiments
+    spacing_var <- if (input$trial_type == "initial") "correct_space_category" else "spacing_category"
+    
+    # Check spacing variable availability based on experiment selection and trial type
+    if (input$trial_type == "initial") {
+      # Initial trials: all experiments have correct_space_category
+      spacing_available <- TRUE
+    } else {
+      # All trials: Exp1C lacks spacing_category
+      spacing_available <- !(("Exp1C" %in% selected_exps) && length(selected_exps) == 1)
+    }
+    
+    # Filter selected factors to only include available ones
+    available_factors <- selected_factors
+    if (!spacing_available && spacing_var %in% available_factors) {
+      available_factors <- setdiff(available_factors, spacing_var)
+    }
+    
+    # Build x-axis choices: "None" + available selected factors
+    x_axis_choices <- c("None", available_factors)
+    names(x_axis_choices) <- x_axis_choices
+    
+    # Preserve current selection if still valid, otherwise reset to "None"
+    new_selection <- if (current_x_axis %in% x_axis_choices) current_x_axis else "None"
+    
+    # Set feedback message if selection was changed
+    if (current_x_axis != "None" && current_x_axis != new_selection) {
+      if (current_x_axis %in% selected_factors && !spacing_available) {
+        # Variable became unavailable due to experiment selection
+        x_axis_message(paste0("ℹ️ X-axis reset: '", current_x_axis, "' not available for selected experiments"))
+      } else if (!current_x_axis %in% selected_factors) {
+        # Variable was unchecked from factors
+        x_axis_message(paste0("ℹ️ X-axis reset: '", current_x_axis, "' was unchecked in factors"))
+      } else {
+        x_axis_message("")
+      }
+    } else {
+      x_axis_message("")
+    }
+    
+    # Update x-axis dropdown
+    updateSelectInput(session, "x_axis", 
+                     choices = x_axis_choices, 
+                     selected = new_selection)
   })
 
   # Separate observer for emmeans choices - only update when experiment selection changes
@@ -395,6 +458,13 @@ server <- function(input, output, session) {
     }
     if (outcome_var == "spacing_deviation" && any(is.infinite(dat$spacing_deviation_relative) | is.na(dat$spacing_deviation_relative))) {
       dat <- dat %>% dplyr::filter(!is.na(spacing_deviation_relative), is.finite(spacing_deviation_relative))
+    }
+    # Clean rows for baseline-corrected variables
+    if (outcome_var == "corrected_width_deviation" && any(is.infinite(dat$corrected_width_deviation) | is.na(dat$corrected_width_deviation))) {
+      dat <- dat %>% dplyr::filter(!is.na(corrected_width_deviation), is.finite(corrected_width_deviation))
+    }
+    if (outcome_var == "corrected_width_deviation_relative" && any(is.infinite(dat$corrected_width_deviation_relative) | is.na(dat$corrected_width_deviation_relative))) {
+      dat <- dat %>% dplyr::filter(!is.na(corrected_width_deviation_relative), is.finite(corrected_width_deviation_relative))
     }
     dat
   })
@@ -480,6 +550,8 @@ server <- function(input, output, session) {
                              spacing_deviation = "Spacing Deviation",
                              width_deviation_relative = "Relative Width Deviation",
                              spacing_deviation_relative = "Relative Spacing Deviation",
+                             corrected_width_deviation = "Baseline-Corrected Width Deviation",
+                             corrected_width_deviation_relative = "Baseline-Corrected Relative Width Deviation",
                              pooled_width_deviation = "Pooled Width Deviation",
                              width_density_deviation = "Width Density Deviation",
                              edge_to_edge_spacing_deviation = "Edge-to-Edge Spacing Deviation",
@@ -505,6 +577,8 @@ server <- function(input, output, session) {
       spacing_deviation = "spacing_deviation = response_space - correct_space",
       width_deviation_relative = "width_deviation_relative = (response_width - correct_width) / correct_width",
       spacing_deviation_relative = "spacing_deviation_relative = (response_space - correct_space) / correct_space",
+      corrected_width_deviation = "corrected_width_deviation = width_deviation - individual_baseline_bias<br/>removes systematic individual biases using one-bar baseline data",
+      corrected_width_deviation_relative = "corrected_width_deviation_relative = corrected_width_deviation / correct_width<br/>baseline-corrected deviation normalized by correct width",
       pooled_width_deviation = "pooled_width_deviation = (response_width × response_num) - (correct_width × correct_num)",
       width_density_deviation = "width_density_deviation = response_width_density - actual_width_density<br/>where width_density = (width × number) / stimulus_length",
       edge_to_edge_spacing_deviation = "edge_to_edge_spacing_deviation = (response_space - response_width) - (correct_space - correct_width)<br/>measuring the gap between elements",
@@ -519,9 +593,9 @@ server <- function(input, output, session) {
     req(nrow(dat) > 0, input$viz_mode, input$exp_select, input$trial_type)
     xvar <- input$x_axis
     
-    # Validate that x-axis variable exists in the data when not "None"
-    if (xvar != "None" && !xvar %in% names(dat)) {
-      # Fallback to "None" if the selected x-axis variable doesn't exist
+    # Validate that x-axis variable exists in the data and is selected in factors when not "None"
+    if (xvar != "None" && (!xvar %in% names(dat) || !xvar %in% input$factors)) {
+      # This should now be prevented by the x-axis synchronization observer
       xvar <- "None"
     }
     
@@ -701,6 +775,16 @@ server <- function(input, output, session) {
             <span style='color: #856404;'>Emmeans analysis with multiple experiments may cause model convergence issues. 
             For reliable emmeans results, please select only <strong>one experiment</strong> at a time.</span>
             </div>")
+    } else {
+      HTML("")
+    }
+  })
+
+  # X-axis feedback messages
+  output$x_axis_feedback <- renderUI({
+    msg <- x_axis_message()
+    if (msg != "") {
+      HTML(paste0("<div style='background-color: #d1ecf1; border: 1px solid #bee5eb; border-radius: 4px; padding: 8px; margin-bottom: 10px; color: #0c5460; font-size: 14px;'>", msg, "</div>"))
     } else {
       HTML("")
     }
