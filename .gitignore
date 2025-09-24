@@ -3,11 +3,10 @@ CLAUDE.md
 *.legacy
 .legacy/
 .claude/
+archive_legacy/
 
 # Ignore individual experiment data folders, keep only summary files
-datasets/Exp1A/
-datasets/Exp1B/
-datasets/Exp1C/
+datasets/exp1/
 
 # Ignore generated figures
 figures/
