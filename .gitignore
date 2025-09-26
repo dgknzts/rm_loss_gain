@@ -12,10 +12,7 @@ datasets/exp1/
 figures/
 
 # Shiny deployment files and copied data
-interactive_plot/processed.csv
-interactive_plot/deploy_setup.R
-interactive_plot/DEPLOYMENT_GUIDE.md
-interactive_plot/rsconnect/
+outputs/
 
 # R specific ignores
 .Rproj.user/
