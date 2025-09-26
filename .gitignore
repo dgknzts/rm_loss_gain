@@ -1,5 +1,6 @@
 # Ignore Claude documentation and legacy files
 CLAUDE.md
+AGENTS.md
 *.legacy
 .legacy/
 .claude/
@@ -14,6 +15,7 @@ figures/
 
 # Shiny deployment files and copied data
 outputs/
+outputs/tables/
 
 # R specific ignores
 .Rproj.user/
