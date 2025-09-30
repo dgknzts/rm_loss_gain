@@ -15,7 +15,7 @@ library(scales)
 #' @param base_size Base font size
 #' @param base_family Base font family
 #' @return ggplot2 theme object
-theme_scientific <- function(base_size = 12, base_family = "") {
+theme_scientific <- function(base_size = 12, base_family = "Arial") {
   theme_minimal(base_size = base_size, base_family = base_family) +
     theme(
       # Panel and plot background
@@ -57,8 +57,8 @@ theme_scientific <- function(base_size = 12, base_family = "") {
 }
 
 #' Minimal theme for simple plots
-theme_minimal_scientific <- function(base_size = 11) {
-  theme_minimal(base_size = base_size) +
+theme_minimal_scientific <- function(base_size = 11, base_family = "Arial") {
+  theme_minimal(base_size = base_size, base_family = base_family) +
     theme(
       panel.grid.minor = element_blank(),
       panel.grid.major.x = element_blank(),
