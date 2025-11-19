@@ -1,5 +1,6 @@
-# Spacing Deviation Statistical Analysis
+# Width Deviation Statistical Analysis - Exp2
 # Mixed-effects model with emmeans contrasts
+# NOTE: No spacing_category in exp2 (3-way interaction instead of 4-way)
 
 library(tidyverse)
 library(lme4)
@@ -17,45 +18,35 @@ format_p <- function(p) {
 }
 
 # Load and prepare data
-df <- read.csv('data/processed.csv')
-
-spacing_cut <- quantile(df$correct_space, probs = 1/3, na.rm = TRUE)
+df <- read.csv('data/exp2/processed.csv')
 
 analysis_data <- df %>%
   filter(number_deviation %in% c(-1, 0)) %>%
   mutate(
     rm_type = factor(if_else(number_deviation == -1, 'RM', 'Non-RM'), levels = c('Non-RM', 'RM')),
     correct_num = factor(correct_num),
-    correct_width = factor(correct_width),
-    spacing_category = case_when(
-      correct_space <= spacing_cut ~ 'Smaller',
-      correct_space <= 0.9 ~ 'Middle',
-      TRUE ~ 'Larger'
-    ),
-    spacing_category = factor(spacing_category, levels = c('Smaller', 'Middle', 'Larger'))
+    correct_width = factor(correct_width)
   ) %>%
-  drop_na(spacing_deviation)
+  drop_na(width_deviation)
 
-# Fit model
-model <- lmer(spacing_deviation ~ rm_type * spacing_category * correct_num * correct_width + (1 | subID),
+# Fit model (3-way interaction for exp2 - no spacing_category)
+model <- lmer(width_deviation ~ rm_type * correct_num * correct_width + (1 | subID),
               data = analysis_data, REML = FALSE)
 
 # Calculate emmeans and contrasts
-emm_spacing_setsize <- emmeans(model, ~ rm_type | spacing_category + correct_num)
-spacing_dev_contrasts <- pairs(emm_spacing_setsize)
+emm_width_setsize <- emmeans(model, ~ rm_type | correct_width + correct_num)
+width_dev_contrasts <- pairs(emm_width_setsize)
 
 # Export results
-if (!dir.exists('outputs/tables')) {
-  dir.create('outputs/tables', recursive = TRUE)
-}
 
-write.csv(as.data.frame(summary(emm_spacing_setsize)),
-          'outputs/tables/spacing_deviation_emmeans_by_spacing_setsize.csv', 
+
+write.csv(as.data.frame(summary(emm_width_setsize)),
+          'outputs/exp2/tables/width_deviation_emmeans_by_width_setsize.csv',
           row.names = FALSE)
 
-spacing_contrast_summary <- summary(spacing_dev_contrasts, infer = TRUE)
-write.csv(as.data.frame(spacing_contrast_summary),
-          'outputs/tables/spacing_deviation_rm_contrasts.csv', 
+width_contrast_summary <- summary(width_dev_contrasts, infer = TRUE)
+write.csv(as.data.frame(width_contrast_summary),
+          'outputs/exp2/tables/width_deviation_rm_contrasts.csv',
           row.names = FALSE)
 
 # Calculate effect sizes and format results
@@ -70,15 +61,15 @@ o_norm <- o_means %>% filter(rm_type == 'Non-RM')
 
 cohen_d_overall <- overall_contrast$estimate / residual_sd
 
-cat('Overall RM vs Non-RM comparison:\\n')
-cat(sprintf('RM (M = %s, SE = %s) vs Non-RM (M = %s, SE = %s), z = %s, %s, d = %s\\n',
-            format_num(o_rm$emmean), format_num(o_rm$SE), 
+cat('Overall RM vs Non-RM comparison:\n')
+cat(sprintf('RM (M = %s, SE = %s) vs Non-RM (M = %s, SE = %s), z = %s, %s, d = %s\n',
+            format_num(o_rm$emmean), format_num(o_rm$SE),
             format_num(o_norm$emmean), format_num(o_norm$SE),
             format_num(overall_contrast$z.ratio, 2), format_p(overall_contrast$p.value),
             format_num(cohen_d_overall, 3)))
 
 # Individual contrasts with effect sizes
-contrasts_with_d <- as_tibble(spacing_contrast_summary) %>%
+contrasts_with_d <- as_tibble(width_contrast_summary) %>%
   mutate(
     cohen_d = estimate / residual_sd,
     p_fdr = p.adjust(p.value, method = 'BH')
@@ -87,44 +78,45 @@ contrasts_with_d <- as_tibble(spacing_contrast_summary) %>%
 significant_effects <- sum(contrasts_with_d$p_fdr < 0.05)
 total_effects <- nrow(contrasts_with_d)
 
-cat(sprintf('\\nSignificant effects: %d out of %d comparisons (%.1f%%)\\n', 
-            significant_effects, total_effects, 
+cat(sprintf('\nSignificant effects: %d out of %d comparisons (%.1f%%)\n',
+            significant_effects, total_effects,
             100 * significant_effects / total_effects))
 
 strongest <- contrasts_with_d %>% slice_max(abs(estimate))
-cat(sprintf('Strongest effect: %s spacing, Set size %s (d = %s, %s)\\n',
-            strongest$spacing_category, strongest$correct_num,
+cat(sprintf('Strongest effect: Width %s, Set size %s (d = %s, %s)\n',
+            strongest$correct_width, strongest$correct_num,
             format_num(strongest$cohen_d, 3), format_p(strongest$p.value)))
 
 # Detailed pairwise comparison output
-cat('\\n=== DETAILED PAIRWISE COMPARISONS ===\\n')
+cat('\n=== DETAILED PAIRWISE COMPARISONS ===\n')
 
 # Get emmeans for detailed output
-spacing_emmeans_detailed <- summary(emm_spacing_setsize)
+width_emmeans_detailed <- summary(emm_width_setsize)
 
 for(i in 1:nrow(contrasts_with_d)) {
   row <- contrasts_with_d[i,]
-  
+
   # Find corresponding emmeans
-  rm_mean <- spacing_emmeans_detailed %>% 
-    filter(spacing_category == row$spacing_category, 
-           correct_num == row$correct_num, 
+  rm_mean <- width_emmeans_detailed %>%
+    filter(correct_width == row$correct_width,
+           correct_num == row$correct_num,
            rm_type == "RM")
-  
-  norm_mean <- spacing_emmeans_detailed %>% 
-    filter(spacing_category == row$spacing_category, 
-           correct_num == row$correct_num, 
+
+  norm_mean <- width_emmeans_detailed %>%
+    filter(correct_width == row$correct_width,
+           correct_num == row$correct_num,
            rm_type == "Non-RM")
-  
+
   # Format p-values
   p_main <- format_p(row$p.value)
   p_fdr <- if(row$p_fdr < 0.001) "FDR p < 0.001" else sprintf("FDR p = %.3f", row$p_fdr)
-  
-  cat(sprintf('%s spacing, Set size %s: RM (M = %s, SE = %s) vs Non-RM (M = %s, SE = %s), z = %s, %s (%s), d = %s, 95%% CI [%s, %s].\\n',
-              row$spacing_category, row$correct_num,
+
+  cat(sprintf('Width %s, Set size %s: RM (M = %s, SE = %s) vs Non-RM (M = %s, SE = %s), z = %s, %s (%s), d = %s, 95%% CI [%s, %s].\n',
+              row$correct_width, row$correct_num,
               format_num(rm_mean$emmean), format_num(rm_mean$SE),
               format_num(norm_mean$emmean), format_num(norm_mean$SE),
               format_num(row$z.ratio, 2), p_main, p_fdr,
               format_num(row$cohen_d, 3),
               format_num(row$asymp.LCL, 3), format_num(row$asymp.UCL, 3)))
 }
+

@@ -3,7 +3,7 @@
 # ==============================================================================
 # This script generates comprehensive descriptive statistics for exp1
 # Input: Processed dataset from data/processed.csv
-# Output: Descriptive tables saved to outputs/tables/
+# Output: Descriptive tables saved to outputs/exp1/tables/
 # ==============================================================================
 
 library(tidyverse)
@@ -12,7 +12,7 @@ library(knitr)
 cat("Generating descriptive statistics for Exp1...\n\n")
 
 # Load processed data
-df <- read.csv("data/processed.csv")
+df <- read.csv("data/exp1/processed.csv")
 
 # ==============================================================================
 # SAMPLE CHARACTERISTICS
@@ -160,15 +160,15 @@ if (ncol(correlation_vars) > 1) {
 # ==============================================================================
 
 # Create outputs directory if it doesn't exist
-if (!dir.exists("outputs/tables")) {
-  dir.create("outputs/tables", recursive = TRUE)
+if (!dir.exists("outputs/exp1/tables")) {
+  dir.create("outputs/exp1/tables", recursive = TRUE)
 }
 
 # Save main descriptive statistics table
-write.csv(descriptives, "outputs/tables/descriptive_statistics_by_condition.csv", row.names = FALSE)
+write.csv(descriptives, "outputs/exp1/tables/descriptive_statistics_by_condition.csv", row.names = FALSE)
 
 # Save design balance table
-write.csv(design_balance, "outputs/tables/experimental_design_balance.csv", row.names = FALSE)
+write.csv(design_balance, "outputs/exp1/tables/experimental_design_balance.csv", row.names = FALSE)
 
 # Save sample characteristics
 sample_summary <- tibble(
@@ -178,13 +178,13 @@ sample_summary <- tibble(
             min(trials_per_participant$n_trials), max(trials_per_participant$n_trials))
 )
 
-write.csv(sample_summary, "outputs/tables/sample_characteristics.csv", row.names = FALSE)
+write.csv(sample_summary, "outputs/exp1/tables/sample_characteristics.csv", row.names = FALSE)
 
 # Save RM condition distribution
-write.csv(rm_distribution, "outputs/tables/rm_condition_distribution.csv", row.names = FALSE)
+write.csv(rm_distribution, "outputs/exp1/tables/rm_condition_distribution.csv", row.names = FALSE)
 
 cat("\nDescriptive analysis complete!\n")
-cat("Tables saved to outputs/tables/:\n")
+cat("Tables saved to outputs/exp1/tables/:\n")
 cat("- descriptive_statistics_by_condition.csv\n")
 cat("- experimental_design_balance.csv\n") 
 cat("- sample_characteristics.csv\n")

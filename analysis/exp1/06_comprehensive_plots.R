@@ -9,10 +9,10 @@ library(patchwork)
 source("analysis/functions/themes.R")
 
 # Load data and results
-df <- read.csv("data/processed.csv")
-spacing_contrast_results <- read.csv("outputs/tables/spacing_deviation_rm_contrasts.csv")
-width_contrast_results <- read.csv("outputs/tables/width_deviation_rm_contrasts.csv")
-load("outputs/tables/bayesian_analysis_results.RData")
+df <- read.csv("data/exp1/processed.csv")
+spacing_contrast_results <- read.csv("outputs/exp1/tables/spacing_deviation_rm_contrasts.csv")
+width_contrast_results <- read.csv("outputs/exp1/tables/width_deviation_rm_contrasts.csv")
+load("outputs/exp1/tables/bayesian_analysis_results.RData")
 
 # Color scheme
 rm_colors <- c("Non-RM" = "#2E8B57", "RM" = "#DC143C")
@@ -356,12 +356,12 @@ final_plot <- final_plot +
   plot_layout(heights = c(1, 1, 1, 0.8))
 
 # Save comprehensive figure
-if (!dir.exists('outputs/figures')) {
-  dir.create('outputs/figures', recursive = TRUE)
+if (!dir.exists('outputs/exp1/figures')) {
+  dir.create('outputs/exp1/figures', recursive = TRUE)
 }
 
 ggsave(
-  filename = "outputs/figures/comprehensive_deviation_analysis.png",
+  filename = "outputs/exp1/figures/comprehensive_deviation_analysis.png",
   plot = final_plot,
   width = 9,
   height = 11,
@@ -371,7 +371,7 @@ ggsave(
 )
 
 ggsave(
-  filename = "outputs/figures/comprehensive_deviation_analysis.pdf",
+  filename = "outputs/exp1/figures/comprehensive_deviation_analysis.pdf",
   plot = final_plot,
   width = 9,
   height = 11,

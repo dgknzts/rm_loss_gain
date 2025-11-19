@@ -5,7 +5,7 @@ library(tidyverse)
 library(BayesFactor)
 
 # Load processed data
-df <- read.csv("data/processed.csv")
+df <- read.csv("data/exp1/processed.csv")
 
 # Prepare data
 df_analysis <- df %>%
@@ -145,11 +145,11 @@ bayesian_results <- list(
 )
 
 # Save results
-if (!dir.exists('outputs/tables')) {
-  dir.create('outputs/tables', recursive = TRUE)
+if (!dir.exists('outputs/exp1/tables')) {
+  dir.create('outputs/exp1/tables', recursive = TRUE)
 }
 
-save(bayesian_results, file = "outputs/tables/bayesian_analysis_results.RData")
+save(bayesian_results, file = "outputs/exp1/tables/bayesian_analysis_results.RData")
 
 # Print results
 cat('Bayesian One-Sample T-Tests Results:\\n\\n')

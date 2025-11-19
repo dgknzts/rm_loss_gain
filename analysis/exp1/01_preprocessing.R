@@ -2,8 +2,8 @@
 # REDUNDANCY MASKING STUDY - DATA PREPROCESSING PIPELINE
 # ==============================================================================
 # This script processes raw exp1 data files into analysis-ready format
-# Input: Raw CSV files in data/raw/
-# Output: Processed dataset in data/processed.csv
+# Input: Raw CSV files in data/exp1/raw/
+# Output: Processed dataset in data/exp1/processed.csv
 # ==============================================================================
 
 library(tidyverse)
@@ -19,14 +19,14 @@ cat("Starting data preprocessing pipeline for Exp1...\n\n")
 final_data <- data.frame()
 
 # List all exp1 data files in raw data directory
-files <- list.files(path = "data/raw/", pattern = "^[0-9]+_exp1_.*\\.csv$")
+files <- list.files(path = "data/exp1/raw/", pattern = "^[0-9]+_exp1_.*\\.csv$")
 
 cat("Found", length(files), "raw data files to process\n")
 
 # Process each participant's data file
 for (i in seq_along(files)) {
   file_name <- files[i]
-  full_file_path <- file.path("data/raw/", file_name)
+  full_file_path <- file.path("data/exp1/raw/", file_name)
   
   # Read the CSV file
   df <- read.csv(full_file_path, header = TRUE)
@@ -172,6 +172,7 @@ initial_count <- nrow(df_unfiltered)
 
 # Apply filters step by step
 df_filtered <- df_unfiltered %>%
+  # filter(response_rt > 1) %>% eliminate fast responses?
   filter(response_rt < 10) %>%                                    # Remove very slow responses
   filter(number_deviation < 4, number_deviation > -4) %>%        # Remove extreme number deviations  
   filter(response_edge_to_edge_spacing > 0 | response_num == 1)   # Remove negative spacing (except single items)
@@ -216,10 +217,10 @@ exclusion_plot <- ggplot(filter_steps[-1, ], aes(x = step, y = excluded_trials))
   )
 
 # Save exclusion plot
-if (!dir.exists("outputs/figures")) {
-  dir.create("outputs/figures", recursive = TRUE)
+if (!dir.exists("outputs/exp1/figures")) {
+  dir.create("outputs/exp1/figures", recursive = TRUE)
 }
-ggsave("outputs/figures/data_exclusions_exp1.png", exclusion_plot, 
+ggsave("outputs/exp1/figures/data_exclusions_exp1.png", exclusion_plot,
        width = 10, height = 6, dpi = 300, bg = "white")
 
 # ==============================================================================
@@ -227,8 +228,8 @@ ggsave("outputs/figures/data_exclusions_exp1.png", exclusion_plot,
 # ==============================================================================
 
 # Save final processed dataset
-write.csv(df_filtered, "data/processed.csv", row.names = FALSE)
+write.csv(df_filtered, "data/exp1/processed.csv", row.names = FALSE)
 
 cat("Preprocessing complete!\n")
-cat("Processed data saved to: data/processed.csv\n")
-cat("Exclusion plot saved to: outputs/figures/data_exclusions_exp1.png\n")
+cat("Processed data saved to: data/exp1/processed.csv\n")
+cat("Exclusion plot saved to: outputs/exp1/figures/data_exclusions_exp1.png\n")
