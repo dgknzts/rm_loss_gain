@@ -49,5 +49,9 @@ MEMORY.md
 # Experiment 2 code
 experiment_2_Code/
 
+# Presentation scripts
+**/create_presentation*
+*.pptx
+
 # Windows artifacts
 nul
