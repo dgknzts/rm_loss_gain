@@ -21,7 +21,7 @@ theme_scientific <- function(base_size = 12, base_family = "Arial") {
       # Panel and plot background
       panel.background = element_rect(fill = "white", color = NA),
       plot.background = element_rect(fill = "white", color = NA),
-      panel.grid.major = element_line(color = "grey92", size = 0.5),
+      panel.grid.major = element_blank(),
       panel.grid.minor = element_blank(),
       
       # Axis elements
@@ -76,8 +76,8 @@ theme_minimal_scientific <- function(base_size = 11, base_family = "Arial") {
 
 #' Redundancy Masking color scheme
 rm_color_palette <- list(
-  # Primary RM vs NoRM colors
-  primary = c("NoRM" = "#2E8B57", "RM" = "#DC143C"),  # Sea green and crimson
+  # Primary RM vs NoRM colors (colorblind-friendly)
+  primary = c("NoRM" = "#298c8c", "RM" = "#800074"),  # Teal and magenta
   
   # Alternative RM colors
   alternative = c("NoRM" = "#3498DB", "RM" = "#E74C3C"),  # Blue and red

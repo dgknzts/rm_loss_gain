@@ -35,3 +35,18 @@ Thumbs.db
 
 # Log files
 *.log
+
+# Model-based analysis (presentations, notebooks — local only)
+model_based_analysis/
+
+# PDFs
+*.pdf
+
+# Memory files
+MEMORY.md
+
+# Experiment 2 code
+experiment_2_Code/
+
+# Windows artifacts
+nul

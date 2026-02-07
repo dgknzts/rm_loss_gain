@@ -17,7 +17,7 @@ format_p <- function(p) {
 }
 
 # Load and prepare data
-df <- read.csv('data/processed.csv')
+df <- read.csv('data/exp1/processed.csv')
 
 spacing_cut <- quantile(df$correct_space, probs = 1/3, na.rm = TRUE)
 
