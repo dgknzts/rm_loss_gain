@@ -5,6 +5,7 @@ AGENTS.md
 .legacy/
 .claude/
 archive_legacy/
+**/legacy/
 
 # Ignore individual experiment data folders, keep only summary files
 datasets/exp1/
